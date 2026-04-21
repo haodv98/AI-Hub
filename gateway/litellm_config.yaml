@@ -1,0 +1,58 @@
+# LiteLLM Proxy Configuration
+# Provider API keys injected via environment variables at runtime (from Vault)
+# LiteLLM is NOT exposed externally — only accessible from NestJS API internally
+
+model_list:
+  # Anthropic Claude
+  - model_name: claude-opus-4-6
+    litellm_params:
+      model: claude-opus-4-6
+      api_key: os.environ/ANTHROPIC_API_KEY
+
+  - model_name: claude-sonnet-4-6
+    litellm_params:
+      model: claude-sonnet-4-6
+      api_key: os.environ/ANTHROPIC_API_KEY
+
+  - model_name: claude-haiku-4-5-20251001
+    litellm_params:
+      model: claude-haiku-4-5-20251001
+      api_key: os.environ/ANTHROPIC_API_KEY
+
+  # OpenAI
+  - model_name: gpt-4o
+    litellm_params:
+      model: gpt-4o
+      api_key: os.environ/OPENAI_API_KEY
+
+  - model_name: gpt-4o-mini
+    litellm_params:
+      model: gpt-4o-mini
+      api_key: os.environ/OPENAI_API_KEY
+
+  # Google Gemini
+  - model_name: gemini-pro
+    litellm_params:
+      model: gemini/gemini-pro
+      api_key: os.environ/GOOGLE_API_KEY
+
+litellm_settings:
+  # Disable LiteLLM's own auth — NestJS handles all auth
+  master_key: os.environ/LITELLM_MASTER_KEY
+
+  # Drop params not supported by providers
+  drop_params: true
+
+  # Disable telemetry to Litellm cloud
+  telemetry: false
+
+  # Callbacks — post usage events to NestJS internal endpoint
+  success_callback:
+    - custom_callback_compatible_provider
+
+  # Timeout per provider
+  request_timeout: 300
+
+general_settings:
+  # Only bind to internal network
+  server_root_path: ""

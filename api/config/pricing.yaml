@@ -1,0 +1,37 @@
+# AI Provider Pricing Configuration
+# Prices in USD per 1 million tokens
+# Update when providers change pricing
+
+models:
+  # Anthropic Claude
+  claude-opus-4-6:
+    provider: anthropic
+    inputPricePerMillion: 15.0
+    outputPricePerMillion: 75.0
+
+  claude-sonnet-4-6:
+    provider: anthropic
+    inputPricePerMillion: 3.0
+    outputPricePerMillion: 15.0
+
+  claude-haiku-4-5-20251001:
+    provider: anthropic
+    inputPricePerMillion: 0.25
+    outputPricePerMillion: 1.25
+
+  # OpenAI
+  gpt-4o:
+    provider: openai
+    inputPricePerMillion: 5.0
+    outputPricePerMillion: 15.0
+
+  gpt-4o-mini:
+    provider: openai
+    inputPricePerMillion: 0.15
+    outputPricePerMillion: 0.60
+
+  # Google
+  gemini-pro:
+    provider: google
+    inputPricePerMillion: 0.5
+    outputPricePerMillion: 1.5

@@ -1,0 +1,55 @@
+.claude/sessions/
+.claude/audit.log
+.gitnexus/
+
+# Environment files
+.env
+.env.local
+.env.*.local
+.env.vault
+
+# Dependencies
+node_modules/
+**/node_modules/
+
+# Build artifacts
+dist/
+**/dist/
+build/
+.next/
+
+# Prisma generated
+api/src/generated/
+
+# Secrets & keys
+*.key
+*.pem
+*.p12
+*.pfx
+pilot-keys.csv
+bulk-keys-*.csv
+
+# Vault data
+infra/vault/data/
+
+# Logs
+*.log
+logs/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+*.swp
+
+# Docker
+infra/docker-compose.override.yml
+
+# Misc
+graphify-out/
+.claude/briefing.log
+# Added by code-review-graph
+.code-review-graph/

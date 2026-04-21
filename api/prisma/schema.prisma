@@ -1,0 +1,247 @@
+generator client {
+  provider = "prisma-client-js"
+  // Prisma v6: omit is now stable (no preview flag needed)
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ── Enums ────────────────────────────────────────────────────────────────────
+
+enum UserRole {
+  SUPER_ADMIN
+  IT_ADMIN
+  TEAM_LEAD
+  MEMBER
+}
+
+enum UserStatus {
+  ACTIVE
+  OFFBOARDED
+  SUSPENDED
+}
+
+enum TeamMemberTier {
+  MEMBER
+  SENIOR
+  LEAD
+}
+
+enum ApiKeyStatus {
+  ACTIVE
+  ROTATING
+  REVOKED
+  EXPIRED
+}
+
+enum ProviderType {
+  ANTHROPIC
+  OPENAI
+  GOOGLE
+}
+
+enum ProviderKeyScope {
+  SHARED
+  PER_SEAT
+}
+
+enum AuditAction {
+  KEY_GENERATE
+  KEY_ROTATE
+  KEY_REVOKE
+  KEY_EXPIRE
+  USER_CREATE
+  USER_UPDATE
+  USER_OFFBOARD
+  TEAM_CREATE
+  TEAM_UPDATE
+  TEAM_DELETE
+  MEMBER_ADD
+  MEMBER_REMOVE
+  MEMBER_TIER_CHANGE
+  POLICY_CREATE
+  POLICY_UPDATE
+  POLICY_DELETE
+}
+
+// ── Models ───────────────────────────────────────────────────────────────────
+
+model User {
+  id          String     @id @default(uuid())
+  email       String     @unique
+  fullName    String     @map("full_name")
+  role        UserRole   @default(MEMBER)
+  status      UserStatus @default(ACTIVE)
+  offboardedAt DateTime? @map("offboarded_at")
+  createdAt   DateTime   @default(now()) @map("created_at")
+  updatedAt   DateTime   @updatedAt @map("updated_at")
+
+  teamMembers  TeamMember[]
+  apiKeys      ApiKey[]
+  auditLogsActor AuditLog[] @relation("ActorAuditLogs")
+  seatLicenses SeatLicense[]
+  providerKeys ProviderKey[]
+  upgradeRequests UpgradeRequest[] @relation("RequesterUpgradeRequests")
+  approvedByLead  UpgradeRequest[] @relation("LeadApproverUpgradeRequests")
+  approvedByAdmin UpgradeRequest[] @relation("AdminApproverUpgradeRequests")
+
+  @@map("users")
+}
+
+model Team {
+  id                String   @id @default(uuid())
+  name              String   @unique
+  description       String?
+  monthlyBudgetUsd  Float    @default(0) @map("monthly_budget_usd")
+  createdAt         DateTime @default(now()) @map("created_at")
+  updatedAt         DateTime @updatedAt @map("updated_at")
+
+  members   TeamMember[]
+  policies  Policy[]
+
+  @@map("teams")
+}
+
+model TeamMember {
+  id        String         @id @default(uuid())
+  userId    String         @map("user_id")
+  teamId    String         @map("team_id")
+  tier      TeamMemberTier @default(MEMBER)
+  isPrimary Boolean        @default(true) @map("is_primary")
+  joinedAt  DateTime       @default(now()) @map("joined_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  team Team @relation(fields: [teamId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, teamId])
+  @@map("team_members")
+}
+
+model Policy {
+  id             String    @id @default(uuid())
+  name           String
+  description    String?
+  teamId         String?   @map("team_id")
+  tier           TeamMemberTier? // null = team-level; set = role-level
+  userId         String?   @map("user_id") // set = individual override
+  priority       Int       @default(0)
+  isActive       Boolean   @default(true) @map("is_active")
+  allowedEngines String[]  @map("allowed_engines") // model IDs
+  config         Json      @default("{}") // { limits: {rpm, dailyTokens, monthlyBudgetUsd}, fallback: {...} }
+  createdAt      DateTime  @default(now()) @map("created_at")
+  updatedAt      DateTime  @updatedAt @map("updated_at")
+
+  team Team? @relation(fields: [teamId], references: [id], onDelete: SetNull)
+
+  @@map("policies")
+}
+
+model ApiKey {
+  id           String       @id @default(uuid())
+  userId       String       @map("user_id")
+  keyHash      String       @unique @map("key_hash")
+  keyPrefix    String       @map("key_prefix") // first 20 chars for display
+  status       ApiKeyStatus @default(ACTIVE)
+  rotatedFromId String?     @map("rotated_from_id")
+  rotatedAt    DateTime?    @map("rotated_at")
+  revokedAt    DateTime?    @map("revoked_at")
+  expiresAt    DateTime?    @map("expires_at")
+  lastUsedAt   DateTime?    @map("last_used_at")
+  createdAt    DateTime     @default(now()) @map("created_at")
+  updatedAt    DateTime     @updatedAt @map("updated_at")
+
+  user        User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  rotatedFrom ApiKey? @relation("KeyRotation", fields: [rotatedFromId], references: [id])
+  rotatedTo   ApiKey[] @relation("KeyRotation")
+
+  @@index([keyHash])
+  @@index([userId, status])
+  @@map("api_keys")
+}
+
+model ProviderKey {
+  id         String           @id @default(uuid())
+  provider   ProviderType
+  scope      ProviderKeyScope @default(SHARED)
+  userId     String?          @map("user_id")   // null = shared; set = per-seat
+  vaultPath  String           @map("vault_path")
+  isActive   Boolean          @default(true) @map("is_active")
+  assignedAt DateTime         @default(now()) @map("assigned_at")
+  createdAt  DateTime         @default(now()) @map("created_at")
+  updatedAt  DateTime         @updatedAt @map("updated_at")
+
+  user User? @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([provider, scope, isActive])
+  @@index([userId, provider])
+  @@map("provider_keys")
+}
+
+model AuditLog {
+  id         String      @id @default(uuid())
+  actorId    String?     @map("actor_id")
+  action     AuditAction
+  targetType String?     @map("target_type")
+  targetId   String?     @map("target_id")
+  details    Json?
+  ipAddress  String?     @map("ip_address")
+  createdAt  DateTime    @default(now()) @map("created_at")
+
+  actor User? @relation("ActorAuditLogs", fields: [actorId], references: [id], onDelete: SetNull)
+
+  @@index([actorId, createdAt])
+  @@index([targetType, targetId])
+  @@index([createdAt])
+  @@map("audit_logs")
+}
+
+model SeatLicense {
+  id          String   @id @default(uuid())
+  userId      String   @map("user_id")
+  toolName    String   @map("tool_name") // "cursor", "claude_web", etc.
+  isActive    Boolean  @default(true) @map("is_active")
+  activatedAt DateTime @default(now()) @map("activated_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, toolName])
+  @@map("seat_licenses")
+}
+
+model AlertLog {
+  id          String   @id @default(uuid())
+  userId      String?  @map("user_id")
+  teamId      String?  @map("team_id")
+  alertType   String   @map("alert_type") // BUDGET_70 | BUDGET_90 | BUDGET_100 | TEAM_BUDGET_70 | SPIKE
+  threshold   Int?
+  currentCost Float?   @map("current_cost")
+  budgetCap   Float?   @map("budget_cap")
+  delivered   Boolean  @default(false)
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  @@index([userId, createdAt])
+  @@index([teamId, createdAt])
+  @@map("alert_logs")
+}
+
+model UpgradeRequest {
+  id              String   @id @default(uuid())
+  userId          String   @map("user_id")
+  requestedTier   TeamMemberTier @map("requested_tier")
+  justification   String
+  status          String   @default("pending_lead") // pending_lead | pending_admin | approved | rejected
+  approvedByLeadId  String? @map("approved_by_lead_id")
+  approvedByAdminId String? @map("approved_by_admin_id")
+  resolvedAt      DateTime? @map("resolved_at")
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+
+  user          User  @relation("RequesterUpgradeRequests", fields: [userId], references: [id], onDelete: Cascade)
+  approvedByLead  User? @relation("LeadApproverUpgradeRequests", fields: [approvedByLeadId], references: [id], onDelete: SetNull)
+  approvedByAdmin User? @relation("AdminApproverUpgradeRequests", fields: [approvedByAdminId], references: [id], onDelete: SetNull)
+
+  @@map("upgrade_requests")
+}

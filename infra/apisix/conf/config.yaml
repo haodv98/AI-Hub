@@ -1,0 +1,41 @@
+apisix:
+  node_listen: 9080
+  enable_ipv6: false
+
+deployment:
+  role: traditional
+  role_traditional:
+    config_provider: etcd
+  etcd:
+    host:
+      - http://etcd:2379
+    prefix: /apisix
+    timeout: 30
+  admin:
+    admin_key_required: true
+    allow_admin:
+      - 0.0.0.0/0
+    admin_listen:
+      ip: 0.0.0.0
+      port: 9180
+    admin_key:
+      - name: admin
+        key: aihub-apisix-admin-key-dev
+        role: admin
+
+plugin_attr:
+  prometheus:
+    export_uri: /apisix/prometheus/metrics
+    export_addr:
+      ip: "0.0.0.0"
+      port: 9091
+
+plugins:
+  - openid-connect
+  - limit-req
+  - limit-count
+  - prometheus
+  - request-id
+  - ip-restriction
+  - response-rewrite
+  - proxy-rewrite

@@ -1,0 +1,39 @@
+groups:
+  - name: aihub-api
+    interval: 30s
+    rules:
+      - alert: NestJSApiDown
+        expr: up{job="nestjs-api"} == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "NestJS API is unreachable"
+          description: "Prometheus cannot scrape the NestJS API at :3001/metrics for > 1 minute."
+
+      - alert: APISixDown
+        expr: up{job="apisix"} == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "APISix gateway is unreachable"
+          description: "Prometheus cannot scrape APISix metrics for > 1 minute."
+
+      - alert: HighAPILatencyP99
+        expr: histogram_quantile(0.99, rate(http_request_duration_seconds_bucket{job="nestjs-api"}[5m])) > 0.5
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "API p99 latency > 500ms"
+          description: "p99 latency is {{ $value | humanizeDuration }} over the last 5 minutes."
+
+      - alert: HighErrorRate
+        expr: rate(http_requests_total{job="nestjs-api", status=~"5.."}[5m]) / rate(http_requests_total{job="nestjs-api"}[5m]) > 0.05
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Error rate > 5%"
+          description: "More than 5% of requests are returning 5xx errors."

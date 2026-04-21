@@ -1,0 +1,101 @@
+{
+  "id": "aihub",
+  "realm": "aihub",
+  "displayName": "AIHub",
+  "enabled": true,
+  "sslRequired": "external",
+  "registrationAllowed": false,
+  "loginWithEmailAllowed": true,
+  "duplicateEmailsAllowed": false,
+  "resetPasswordAllowed": true,
+  "editUsernameAllowed": false,
+  "bruteForceProtected": true,
+  "accessTokenLifespan": 300,
+  "refreshTokenMaxReuse": 0,
+  "ssoSessionMaxLifespan": 36000,
+  "roles": {
+    "realm": [
+      { "name": "super_admin", "description": "Full platform access" },
+      { "name": "it_admin", "description": "Manage teams, users, keys, policies" },
+      { "name": "team_lead", "description": "View own team, read-only" },
+      { "name": "member", "description": "View own usage and key" }
+    ]
+  },
+  "clients": [
+    {
+      "clientId": "aihub-admin-portal",
+      "name": "AIHub Admin Portal",
+      "enabled": true,
+      "publicClient": true,
+      "standardFlowEnabled": true,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": false,
+      "redirectUris": [
+        "http://localhost:5173/*",
+        "http://localhost:3001/*",
+        "https://aihub.internal/*"
+      ],
+      "webOrigins": [
+        "http://localhost:5173",
+        "http://localhost:3001",
+        "https://aihub.internal"
+      ],
+      "attributes": {
+        "pkce.code.challenge.method": "S256"
+      },
+      "defaultClientScopes": [
+        "openid",
+        "profile",
+        "email",
+        "roles"
+      ]
+    },
+    {
+      "clientId": "aihub-gateway",
+      "name": "AIHub Gateway (APISix introspection)",
+      "enabled": true,
+      "publicClient": false,
+      "secret": "aihub-gateway-client-secret-dev",
+      "standardFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": true,
+      "attributes": {},
+      "defaultClientScopes": [
+        "openid",
+        "roles"
+      ]
+    }
+  ],
+  "users": [
+    {
+      "username": "admin@aihub.dev",
+      "email": "admin@aihub.dev",
+      "firstName": "Admin",
+      "lastName": "User",
+      "enabled": true,
+      "emailVerified": true,
+      "credentials": [{ "type": "password", "value": "admin123", "temporary": false }],
+      "realmRoles": ["it_admin"]
+    },
+    {
+      "username": "lead@aihub.dev",
+      "email": "lead@aihub.dev",
+      "firstName": "Team",
+      "lastName": "Lead",
+      "enabled": true,
+      "emailVerified": true,
+      "credentials": [{ "type": "password", "value": "lead123", "temporary": false }],
+      "realmRoles": ["team_lead"]
+    },
+    {
+      "username": "member@aihub.dev",
+      "email": "member@aihub.dev",
+      "firstName": "Team",
+      "lastName": "Member",
+      "enabled": true,
+      "emailVerified": true,
+      "credentials": [{ "type": "password", "value": "member123", "temporary": false }],
+      "realmRoles": ["member"]
+    }
+  ]
+}
