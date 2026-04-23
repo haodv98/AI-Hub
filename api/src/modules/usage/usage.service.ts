@@ -30,6 +30,7 @@ export class UsageService implements OnApplicationShutdown {
   private readonly logger = new Logger(UsageService.name);
   private readonly pending = new Set<Promise<void>>();
   private aggregateViewAvailability: boolean | null = null;
+  private usageEventsAvailability: boolean | null = null;
 
   constructor(
     private readonly prisma: PrismaService,
@@ -76,22 +77,27 @@ export class UsageService implements OnApplicationShutdown {
   }
 
   private async persistEvent(event: UsageEvent): Promise<void> {
+    const canUseRawEvents = await this.canUseRawUsageEvents();
+    if (!canUseRawEvents) {
+      this.logger.warn('usage_events not found; skip raw usage event write');
+    } else {
     // 1. Write to usage_events TimescaleDB hypertable
-    await this.prisma.$executeRaw`
-      INSERT INTO usage_events (
-        created_at, user_id, team_id, api_key_id,
-        model, provider,
-        requested_model, is_fallback,
-        prompt_tokens, completion_tokens, total_tokens,
-        cost_usd, latency_ms, status
-      ) VALUES (
-        NOW(), ${event.userId}, ${event.teamId ?? null}::text, ${event.apiKeyId},
-        ${event.model}, ${event.provider},
-        ${event.model}, false,
-        ${event.promptTokens}, ${event.completionTokens}, ${event.totalTokens},
-        ${event.costUsd}, ${event.latencyMs ?? null}::integer, 'success'
-      )
-    `;
+      await this.prisma.$executeRaw`
+        INSERT INTO usage_events (
+          created_at, user_id, team_id, api_key_id,
+          model, provider,
+          requested_model, is_fallback,
+          prompt_tokens, completion_tokens, total_tokens,
+          cost_usd, latency_ms, status
+        ) VALUES (
+          NOW(), ${event.userId}, ${event.teamId ?? null}::text, ${event.apiKeyId},
+          ${event.model}, ${event.provider},
+          ${event.model}, false,
+          ${event.promptTokens}, ${event.completionTokens}, ${event.totalTokens},
+          ${event.costUsd}, ${event.latencyMs ?? null}::integer, 'success'
+        )
+      `;
+    }
 
     // 2. Update Redis budget counters
     await this.budget.recordActualCost(event.userId, event.teamId, event.costUsd);
@@ -141,8 +147,12 @@ export class UsageService implements OnApplicationShutdown {
     groupBy?: string,
   ): Promise<UsageByModelRow[] | UsageSummaryRow[]> {
     const useAggregates = await this.canUseAggregateViews();
+    const useRawEvents = await this.canUseRawUsageEvents();
 
     if (groupBy === 'model') {
+      if (!useAggregates && !useRawEvents) {
+        return [];
+      }
       if (!useAggregates) {
         return this.prisma.$queryRaw<UsageByModelRow[]>`
           SELECT
@@ -168,7 +178,7 @@ export class UsageService implements OnApplicationShutdown {
           SUM(completion_tokens)::int  AS "completionTokens",
           SUM(total_tokens)::int       AS "totalTokens",
           SUM(cost_usd)::float         AS "costUsd",
-          COUNT(*)::int                AS "requestCount"
+          SUM(request_count)::int      AS "requestCount"
         FROM usage_hourly
         WHERE user_id::text = ${userId}
           AND bucket >= ${from}
@@ -178,6 +188,9 @@ export class UsageService implements OnApplicationShutdown {
       `;
     }
 
+    if (!useAggregates && !useRawEvents) {
+      return [];
+    }
     if (!useAggregates) {
       return this.prisma.$queryRaw<UsageSummaryRow[]>`
         SELECT
@@ -199,7 +212,7 @@ export class UsageService implements OnApplicationShutdown {
         DATE_TRUNC('day', bucket)    AS date,
         SUM(cost_usd)::float         AS "costUsd",
         SUM(total_tokens)::int       AS "totalTokens",
-        COUNT(*)::int                AS "requestCount"
+        SUM(request_count)::int      AS "requestCount"
       FROM usage_hourly
       WHERE user_id::text = ${userId}
         AND bucket >= ${from}
@@ -211,6 +224,10 @@ export class UsageService implements OnApplicationShutdown {
 
   async getTeamUsage(teamId: string, from: Date, to: Date): Promise<UsageSummaryRow[]> {
     const useAggregates = await this.canUseAggregateViews();
+    const useRawEvents = await this.canUseRawUsageEvents();
+    if (!useAggregates && !useRawEvents) {
+      return [];
+    }
     if (!useAggregates) {
       return this.prisma.$queryRaw<UsageSummaryRow[]>`
         SELECT
@@ -232,7 +249,7 @@ export class UsageService implements OnApplicationShutdown {
         DATE_TRUNC('day', bucket)    AS date,
         SUM(cost_usd)::float         AS "costUsd",
         SUM(total_tokens)::int       AS "totalTokens",
-        COUNT(*)::int                AS "requestCount"
+        SUM(request_count)::int      AS "requestCount"
       FROM usage_daily
       WHERE team_id::text = ${teamId}
         AND bucket >= ${from}
@@ -243,167 +260,276 @@ export class UsageService implements OnApplicationShutdown {
   }
 
   async getOrgSummary(from: Date, to: Date): Promise<OrgSummary> {
+    const useAggregates = await this.canUseAggregateViews();
+    const useRawEvents = await this.canUseRawUsageEvents();
+    if (!useAggregates && !useRawEvents) {
+      return {
+        totalCost: 0,
+        totalTokens: 0,
+        totalRequests: 0,
+        teamCount: 0,
+        byDay: [],
+        byTeam: [],
+        providerBreakdown: [],
+        modelUsage: [],
+        topUsers: [],
+        latency: { avgMs: 0 },
+        teamUsage: [],
+        trends: { spendPct: 0, tokensPct: 0, requestsPct: 0 },
+      };
+    }
+
     const msRange = to.getTime() - from.getTime();
     const previousFrom = new Date(from.getTime() - msRange);
     const previousTo = new Date(to.getTime() - msRange);
 
-    const [
-      totals,
-      daily,
-      byTeam,
-      providerBreakdown,
-      modelUsage,
-      topUsers,
-      topUsersPrevious,
-      avgLatency,
-      teamUsageCurrent,
-      totalsPrevious,
-      teamMeta,
-    ] = await Promise.all([
-      this.prisma.$queryRaw<Array<{
-        total_cost: number | null;
-        total_tokens: number | null;
-        total_requests: number | null;
-        team_count: number | null;
-      }>>`
-        SELECT
-          SUM(cost_usd)::float           AS total_cost,
-          SUM(total_tokens)::int         AS total_tokens,
-          COUNT(*)::int                  AS total_requests,
-          COUNT(DISTINCT team_id)::int   AS team_count
-        FROM usage_daily
-        WHERE bucket >= ${from}
-          AND bucket <= ${to}
-      `,
-      this.prisma.$queryRaw<Array<{
-        date: Date;
-        cost_usd: number;
-        total_tokens: number;
-        request_count: number;
-      }>>`
-        SELECT
-          DATE_TRUNC('day', bucket)    AS date,
-          SUM(cost_usd)::float         AS cost_usd,
-          SUM(total_tokens)::int       AS total_tokens,
-          COUNT(*)::int                AS request_count
-        FROM usage_daily
-        WHERE bucket >= ${from}
-          AND bucket <= ${to}
-        GROUP BY DATE_TRUNC('day', bucket)
-        ORDER BY date
-      `,
-      this.prisma.$queryRaw<Array<{
-        team_id: string;
-        team_name: string;
-        cost_usd: number;
-        total_tokens: number;
-        request_count: number;
-      }>>`
-        SELECT
-          ud.team_id,
-          t.name                       AS team_name,
-          SUM(ud.cost_usd)::float      AS cost_usd,
-          SUM(ud.total_tokens)::int    AS total_tokens,
-          COUNT(*)::int                AS request_count
-        FROM usage_daily ud
-        JOIN teams t ON t.id = ud.team_id::text
-        WHERE ud.bucket >= ${from}
-          AND ud.bucket <= ${to}
-          AND ud.team_id IS NOT NULL
-        GROUP BY ud.team_id, t.name
-        ORDER BY cost_usd DESC
-        LIMIT 5
-      `,
-      this.prisma.$queryRaw<Array<{ provider: string; value: number }>>`
-        SELECT
-          provider,
-          SUM(cost_usd)::float AS value
-        FROM usage_events
-        WHERE created_at >= ${from}
-          AND created_at <= ${to}
-        GROUP BY provider
-        ORDER BY value DESC
-        LIMIT 10
-      `,
-      this.prisma.$queryRaw<Array<{ model: string; request_count: number }>>`
-        SELECT
-          model,
-          COUNT(*)::int AS request_count
-        FROM usage_events
-        WHERE created_at >= ${from}
-          AND created_at <= ${to}
-        GROUP BY model
-        ORDER BY request_count DESC
-        LIMIT 10
-      `,
-      this.prisma.$queryRaw<Array<{
-        user_id: string;
-        user_name: string | null;
-        team_name: string | null;
-        spend_usd: number;
-        tokens: number;
-      }>>`
-        SELECT
-          ue.user_id::text AS user_id,
-          u.full_name AS user_name,
-          COALESCE(t.name, 'Unassigned') AS team_name,
-          SUM(ue.cost_usd)::float AS spend_usd,
-          SUM(ue.total_tokens)::int AS tokens
-        FROM usage_events ue
-        LEFT JOIN users u ON u.id = ue.user_id::text
-        LEFT JOIN teams t ON t.id = ue.team_id::text
-        WHERE ue.created_at >= ${from}
-          AND ue.created_at <= ${to}
-        GROUP BY ue.user_id, u.full_name, t.name
-        ORDER BY spend_usd DESC
-        LIMIT 5
-      `,
-      this.prisma.$queryRaw<Array<{ user_id: string; spend_usd: number }>>`
-        SELECT
-          ue.user_id::text AS user_id,
-          SUM(ue.cost_usd)::float AS spend_usd
-        FROM usage_events ue
-        WHERE ue.created_at >= ${previousFrom}
-          AND ue.created_at <= ${previousTo}
-        GROUP BY ue.user_id
-      `,
-      this.prisma.$queryRaw<Array<{ avg_ms: number | null }>>`
-        SELECT AVG(latency_ms)::float AS avg_ms
-        FROM usage_events
-        WHERE created_at >= ${from}
-          AND created_at <= ${to}
-      `,
-      this.prisma.$queryRaw<Array<{ team_id: string; spend_usd: number }>>`
-        SELECT
-          team_id::text AS team_id,
-          SUM(cost_usd)::float AS spend_usd
-        FROM usage_daily
-        WHERE bucket >= ${from}
-          AND bucket <= ${to}
-          AND team_id IS NOT NULL
-        GROUP BY team_id
-      `,
-      this.prisma.$queryRaw<Array<{
-        total_cost: number | null;
-        total_tokens: number | null;
-        total_requests: number | null;
-      }>>`
-        SELECT
-          SUM(cost_usd)::float AS total_cost,
-          SUM(total_tokens)::int AS total_tokens,
-          COUNT(*)::int AS total_requests
-        FROM usage_daily
-        WHERE bucket >= ${previousFrom}
-          AND bucket <= ${previousTo}
-      `,
-      this.prisma.team.findMany({
-        select: {
-          id: true,
-          monthlyBudgetUsd: true,
-          _count: { select: { members: true } },
-        },
-      }),
-    ]);
+    const totalsQuery = useAggregates
+      ? this.prisma.$queryRaw<Array<{ total_cost: number | null; total_tokens: number | null; total_requests: number | null; team_count: number | null }>>`
+          SELECT
+            SUM(cost_usd)::float         AS total_cost,
+            SUM(total_tokens)::int       AS total_tokens,
+            SUM(request_count)::int      AS total_requests,
+            COUNT(DISTINCT team_id)::int AS team_count
+          FROM usage_daily
+          WHERE bucket >= ${from}
+            AND bucket <= ${to}
+        `
+      : this.prisma.$queryRaw<Array<{ total_cost: number | null; total_tokens: number | null; total_requests: number | null; team_count: number | null }>>`
+          SELECT
+            SUM(cost_usd)::float         AS total_cost,
+            SUM(total_tokens)::int       AS total_tokens,
+            COUNT(*)::int                AS total_requests,
+            COUNT(DISTINCT team_id)::int AS team_count
+          FROM usage_events
+          WHERE created_at >= ${from}
+            AND created_at <= ${to}
+        `;
+
+    const dailyQuery = useAggregates
+      ? this.prisma.$queryRaw<Array<{ date: Date; cost_usd: number; total_tokens: number; request_count: number }>>`
+          SELECT
+            DATE_TRUNC('day', bucket) AS date,
+            SUM(cost_usd)::float      AS cost_usd,
+            SUM(total_tokens)::int    AS total_tokens,
+            SUM(request_count)::int   AS request_count
+          FROM usage_daily
+          WHERE bucket >= ${from}
+            AND bucket <= ${to}
+          GROUP BY DATE_TRUNC('day', bucket)
+          ORDER BY date
+        `
+      : this.prisma.$queryRaw<Array<{ date: Date; cost_usd: number; total_tokens: number; request_count: number }>>`
+          SELECT
+            DATE_TRUNC('day', created_at) AS date,
+            SUM(cost_usd)::float          AS cost_usd,
+            SUM(total_tokens)::int        AS total_tokens,
+            COUNT(*)::int                 AS request_count
+          FROM usage_events
+          WHERE created_at >= ${from}
+            AND created_at <= ${to}
+          GROUP BY DATE_TRUNC('day', created_at)
+          ORDER BY date
+        `;
+
+    const byTeamQuery = useAggregates
+      ? this.prisma.$queryRaw<Array<{ team_id: string; team_name: string; cost_usd: number; total_tokens: number; request_count: number }>>`
+          SELECT
+            ud.team_id::text             AS team_id,
+            t.name                       AS team_name,
+            SUM(ud.cost_usd)::float      AS cost_usd,
+            SUM(ud.total_tokens)::int    AS total_tokens,
+            SUM(ud.request_count)::int   AS request_count
+          FROM usage_daily ud
+          JOIN teams t ON t.id = ud.team_id::text
+          WHERE ud.bucket >= ${from}
+            AND ud.bucket <= ${to}
+            AND ud.team_id IS NOT NULL
+          GROUP BY ud.team_id, t.name
+          ORDER BY cost_usd DESC
+          LIMIT 5
+        `
+      : this.prisma.$queryRaw<Array<{ team_id: string; team_name: string; cost_usd: number; total_tokens: number; request_count: number }>>`
+          SELECT
+            ue.team_id::text             AS team_id,
+            t.name                       AS team_name,
+            SUM(ue.cost_usd)::float      AS cost_usd,
+            SUM(ue.total_tokens)::int    AS total_tokens,
+            COUNT(*)::int                AS request_count
+          FROM usage_events ue
+          JOIN teams t ON t.id = ue.team_id::text
+          WHERE ue.created_at >= ${from}
+            AND ue.created_at <= ${to}
+            AND ue.team_id IS NOT NULL
+          GROUP BY ue.team_id, t.name
+          ORDER BY cost_usd DESC
+          LIMIT 5
+        `;
+
+    const providerQuery = useAggregates
+      ? this.prisma.$queryRaw<Array<{ provider: string; value: number }>>`
+          SELECT provider, SUM(cost_usd)::float AS value
+          FROM usage_daily
+          WHERE bucket >= ${from}
+            AND bucket <= ${to}
+          GROUP BY provider
+          ORDER BY value DESC
+          LIMIT 10
+        `
+      : this.prisma.$queryRaw<Array<{ provider: string; value: number }>>`
+          SELECT provider, SUM(cost_usd)::float AS value
+          FROM usage_events
+          WHERE created_at >= ${from}
+            AND created_at <= ${to}
+          GROUP BY provider
+          ORDER BY value DESC
+          LIMIT 10
+        `;
+
+    const modelQuery = useAggregates
+      ? this.prisma.$queryRaw<Array<{ model: string; request_count: number }>>`
+          SELECT model, SUM(request_count)::int AS request_count
+          FROM usage_daily
+          WHERE bucket >= ${from}
+            AND bucket <= ${to}
+          GROUP BY model
+          ORDER BY request_count DESC
+          LIMIT 10
+        `
+      : this.prisma.$queryRaw<Array<{ model: string; request_count: number }>>`
+          SELECT model, COUNT(*)::int AS request_count
+          FROM usage_events
+          WHERE created_at >= ${from}
+            AND created_at <= ${to}
+          GROUP BY model
+          ORDER BY request_count DESC
+          LIMIT 10
+        `;
+
+    const topUsersQuery = useAggregates
+      ? this.prisma.$queryRaw<Array<{ user_id: string; user_name: string | null; team_name: string | null; spend_usd: number; tokens: number }>>`
+          SELECT
+            ud.user_id::text             AS user_id,
+            u.full_name                  AS user_name,
+            COALESCE(t.name, 'Unassigned') AS team_name,
+            SUM(ud.cost_usd)::float      AS spend_usd,
+            SUM(ud.total_tokens)::int    AS tokens
+          FROM usage_daily ud
+          LEFT JOIN users u ON u.id = ud.user_id::text
+          LEFT JOIN teams t ON t.id = ud.team_id::text
+          WHERE ud.bucket >= ${from}
+            AND ud.bucket <= ${to}
+          GROUP BY ud.user_id, u.full_name, t.name
+          ORDER BY spend_usd DESC
+          LIMIT 5
+        `
+      : this.prisma.$queryRaw<Array<{ user_id: string; user_name: string | null; team_name: string | null; spend_usd: number; tokens: number }>>`
+          SELECT
+            ue.user_id::text             AS user_id,
+            u.full_name                  AS user_name,
+            COALESCE(t.name, 'Unassigned') AS team_name,
+            SUM(ue.cost_usd)::float      AS spend_usd,
+            SUM(ue.total_tokens)::int    AS tokens
+          FROM usage_events ue
+          LEFT JOIN users u ON u.id = ue.user_id::text
+          LEFT JOIN teams t ON t.id = ue.team_id::text
+          WHERE ue.created_at >= ${from}
+            AND ue.created_at <= ${to}
+          GROUP BY ue.user_id, u.full_name, t.name
+          ORDER BY spend_usd DESC
+          LIMIT 5
+        `;
+
+    const topUsersPreviousQuery = useAggregates
+      ? this.prisma.$queryRaw<Array<{ user_id: string; spend_usd: number }>>`
+          SELECT
+            user_id::text                AS user_id,
+            SUM(cost_usd)::float         AS spend_usd
+          FROM usage_daily
+          WHERE bucket >= ${previousFrom}
+            AND bucket <= ${previousTo}
+          GROUP BY user_id
+        `
+      : this.prisma.$queryRaw<Array<{ user_id: string; spend_usd: number }>>`
+          SELECT
+            user_id::text                AS user_id,
+            SUM(cost_usd)::float         AS spend_usd
+          FROM usage_events
+          WHERE created_at >= ${previousFrom}
+            AND created_at <= ${previousTo}
+          GROUP BY user_id
+        `;
+
+    const avgLatencyQuery = useAggregates
+      ? Promise.resolve([{ avg_ms: null }])
+      : this.prisma.$queryRaw<Array<{ avg_ms: number | null }>>`
+          SELECT AVG(latency_ms)::float AS avg_ms
+          FROM usage_events
+          WHERE created_at >= ${from}
+            AND created_at <= ${to}
+        `;
+
+    const teamUsageCurrentQuery = useAggregates
+      ? this.prisma.$queryRaw<Array<{ team_id: string; spend_usd: number }>>`
+          SELECT
+            team_id::text                AS team_id,
+            SUM(cost_usd)::float         AS spend_usd
+          FROM usage_daily
+          WHERE bucket >= ${from}
+            AND bucket <= ${to}
+            AND team_id IS NOT NULL
+          GROUP BY team_id
+        `
+      : this.prisma.$queryRaw<Array<{ team_id: string; spend_usd: number }>>`
+          SELECT
+            team_id::text                AS team_id,
+            SUM(cost_usd)::float         AS spend_usd
+          FROM usage_events
+          WHERE created_at >= ${from}
+            AND created_at <= ${to}
+            AND team_id IS NOT NULL
+          GROUP BY team_id
+        `;
+
+    const totalsPreviousQuery = useAggregates
+      ? this.prisma.$queryRaw<Array<{ total_cost: number | null; total_tokens: number | null; total_requests: number | null }>>`
+          SELECT
+            SUM(cost_usd)::float         AS total_cost,
+            SUM(total_tokens)::int       AS total_tokens,
+            SUM(request_count)::int      AS total_requests
+          FROM usage_daily
+          WHERE bucket >= ${previousFrom}
+            AND bucket <= ${previousTo}
+        `
+      : this.prisma.$queryRaw<Array<{ total_cost: number | null; total_tokens: number | null; total_requests: number | null }>>`
+          SELECT
+            SUM(cost_usd)::float         AS total_cost,
+            SUM(total_tokens)::int       AS total_tokens,
+            COUNT(*)::int                AS total_requests
+          FROM usage_events
+          WHERE created_at >= ${previousFrom}
+            AND created_at <= ${previousTo}
+        `;
+
+    const [totals, daily, byTeam, providerBreakdown, modelUsage, topUsers, topUsersPrevious, avgLatency, teamUsageCurrent, totalsPrevious, teamMeta] =
+      await Promise.all([
+        totalsQuery,
+        dailyQuery,
+        byTeamQuery,
+        providerQuery,
+        modelQuery,
+        topUsersQuery,
+        topUsersPreviousQuery,
+        avgLatencyQuery,
+        teamUsageCurrentQuery,
+        totalsPreviousQuery,
+        this.prisma.team.findMany({
+          select: {
+            id: true,
+            monthlyBudgetUsd: true,
+            _count: { select: { members: true } },
+          },
+        }),
+      ]);
 
     const row = totals[0];
     const previous = totalsPrevious[0];
@@ -488,6 +614,24 @@ export class UsageService implements OnApplicationShutdown {
   }
 
   async getUsageHeatmap(from: Date, to: Date): Promise<UsageHeatmapRow[]> {
+    const useAggregates = await this.canUseAggregateViews();
+    const useRawEvents = await this.canUseRawUsageEvents();
+    if (!useAggregates && !useRawEvents) return [];
+
+    if (useAggregates) {
+      return this.prisma.$queryRaw<UsageHeatmapRow[]>`
+        SELECT
+          EXTRACT(DOW FROM bucket)::int  AS "dayOfWeek",
+          EXTRACT(HOUR FROM bucket)::int AS "hourOfDay",
+          SUM(request_count)::int        AS "requestCount"
+        FROM usage_hourly
+        WHERE bucket >= ${from}
+          AND bucket <= ${to}
+        GROUP BY "dayOfWeek", "hourOfDay"
+        ORDER BY "dayOfWeek", "hourOfDay"
+      `;
+    }
+
     return this.prisma.$queryRaw<UsageHeatmapRow[]>`
       SELECT
         EXTRACT(DOW FROM created_at)::int  AS "dayOfWeek",
@@ -502,39 +646,88 @@ export class UsageService implements OnApplicationShutdown {
   }
 
   async getExportSummary(from: Date, to: Date): Promise<UsageExportSummary> {
-    const [totals, byTeam, byProvider] = await Promise.all([
-      this.prisma.$queryRaw<Array<{ total_cost_usd: number | null; total_requests: number | null }>>`
-        SELECT
-          SUM(cost_usd)::float AS total_cost_usd,
-          COUNT(*)::int        AS total_requests
-        FROM usage_events
-        WHERE created_at >= ${from}
-          AND created_at <= ${to}
-      `,
-      this.prisma.$queryRaw<Array<{ team_name: string | null; cost_usd: number; request_count: number }>>`
-        SELECT
-          t.name                  AS team_name,
-          SUM(ue.cost_usd)::float AS cost_usd,
-          COUNT(*)::int           AS request_count
-        FROM usage_events ue
-        LEFT JOIN teams t ON t.id = ue.team_id::text
-        WHERE ue.created_at >= ${from}
-          AND ue.created_at <= ${to}
-        GROUP BY t.name
-        ORDER BY cost_usd DESC
-      `,
-      this.prisma.$queryRaw<Array<{ provider: string; cost_usd: number; request_count: number }>>`
-        SELECT
-          provider,
-          SUM(cost_usd)::float AS cost_usd,
-          COUNT(*)::int        AS request_count
-        FROM usage_events
-        WHERE created_at >= ${from}
-          AND created_at <= ${to}
-        GROUP BY provider
-        ORDER BY cost_usd DESC
-      `,
-    ]);
+    const useAggregates = await this.canUseAggregateViews();
+    const useRawEvents = await this.canUseRawUsageEvents();
+    if (!useAggregates && !useRawEvents) {
+      return {
+        from: from.toISOString(),
+        to: to.toISOString(),
+        totalCostUsd: 0,
+        totalRequests: 0,
+        byTeam: [],
+        byProvider: [],
+      };
+    }
+
+    const totalsQuery = useAggregates
+      ? this.prisma.$queryRaw<Array<{ total_cost_usd: number | null; total_requests: number | null }>>`
+          SELECT
+            SUM(cost_usd)::float      AS total_cost_usd,
+            SUM(request_count)::int   AS total_requests
+          FROM usage_daily
+          WHERE bucket >= ${from}
+            AND bucket <= ${to}
+        `
+      : this.prisma.$queryRaw<Array<{ total_cost_usd: number | null; total_requests: number | null }>>`
+          SELECT
+            SUM(cost_usd)::float      AS total_cost_usd,
+            COUNT(*)::int             AS total_requests
+          FROM usage_events
+          WHERE created_at >= ${from}
+            AND created_at <= ${to}
+        `;
+
+    const byTeamQuery = useAggregates
+      ? this.prisma.$queryRaw<Array<{ team_name: string | null; cost_usd: number; request_count: number }>>`
+          SELECT
+            t.name                       AS team_name,
+            SUM(ud.cost_usd)::float      AS cost_usd,
+            SUM(ud.request_count)::int   AS request_count
+          FROM usage_daily ud
+          LEFT JOIN teams t ON t.id = ud.team_id::text
+          WHERE ud.bucket >= ${from}
+            AND ud.bucket <= ${to}
+          GROUP BY t.name
+          ORDER BY cost_usd DESC
+        `
+      : this.prisma.$queryRaw<Array<{ team_name: string | null; cost_usd: number; request_count: number }>>`
+          SELECT
+            t.name                  AS team_name,
+            SUM(ue.cost_usd)::float AS cost_usd,
+            COUNT(*)::int           AS request_count
+          FROM usage_events ue
+          LEFT JOIN teams t ON t.id = ue.team_id::text
+          WHERE ue.created_at >= ${from}
+            AND ue.created_at <= ${to}
+          GROUP BY t.name
+          ORDER BY cost_usd DESC
+        `;
+
+    const byProviderQuery = useAggregates
+      ? this.prisma.$queryRaw<Array<{ provider: string; cost_usd: number; request_count: number }>>`
+          SELECT
+            provider,
+            SUM(cost_usd)::float      AS cost_usd,
+            SUM(request_count)::int   AS request_count
+          FROM usage_daily
+          WHERE bucket >= ${from}
+            AND bucket <= ${to}
+          GROUP BY provider
+          ORDER BY cost_usd DESC
+        `
+      : this.prisma.$queryRaw<Array<{ provider: string; cost_usd: number; request_count: number }>>`
+          SELECT
+            provider,
+            SUM(cost_usd)::float      AS cost_usd,
+            COUNT(*)::int             AS request_count
+          FROM usage_events
+          WHERE created_at >= ${from}
+            AND created_at <= ${to}
+          GROUP BY provider
+          ORDER BY cost_usd DESC
+        `;
+
+    const [totals, byTeam, byProvider] = await Promise.all([totalsQuery, byTeamQuery, byProviderQuery]);
 
     return {
       from: from.toISOString(),
@@ -581,5 +774,21 @@ export class UsageService implements OnApplicationShutdown {
       this.logger.warn('usage_hourly/usage_daily not found; fallback to usage_events raw queries');
     }
     return this.aggregateViewAvailability;
+  }
+
+  private async canUseRawUsageEvents(): Promise<boolean> {
+    if (this.usageEventsAvailability !== null) return this.usageEventsAvailability;
+    try {
+      const rows = await this.prisma.$queryRaw<Array<{ usage_events_exists: string | null }>>`
+        SELECT to_regclass('usage_events')::text AS usage_events_exists
+      `;
+      this.usageEventsAvailability = Boolean(rows[0]?.usage_events_exists);
+    } catch {
+      this.usageEventsAvailability = false;
+    }
+    if (!this.usageEventsAvailability) {
+      this.logger.warn('usage_events not found; raw usage queries disabled');
+    }
+    return this.usageEventsAvailability;
   }
 }

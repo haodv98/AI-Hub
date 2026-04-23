@@ -1,12 +1,14 @@
 /* eslint-disable react/react-in-jsx-scope */
 import { useState } from 'react';
 import { Link } from 'react-router';
-import { useQuery } from '@tanstack/react-query';
-import { Plus, ChevronRight, Zap } from 'lucide-react';
-import { motion } from 'motion/react';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { Plus, ChevronRight, Zap, X, UserPlus, Users } from 'lucide-react';
+import { AnimatePresence, motion } from 'motion/react';
 import { BarChart, Bar, ResponsiveContainer } from 'recharts';
 import { formatUsd } from '@/lib/utils';
+import { postEnvelope } from '@/lib/api';
 import api from '@/lib/api';
+import { useGlobalUi } from '@/contexts/GlobalUiContext';
 
 interface Team {
   id: string;
@@ -26,13 +28,6 @@ interface TeamUsage {
 interface UsageSummary {
   teamUsage: TeamUsage[];
 }
-
-const chartData = [
-  { name: 'Core AI', val: 4000 },
-  { name: 'Customer Success', val: 7000 },
-  { name: 'Marketing Lab', val: 9000 },
-  { name: 'Research', val: 5500 },
-];
 
 function useTeams() {
   return useQuery<Team[]>({
@@ -54,28 +49,68 @@ function useTeamUsageSummary() {
 }
 
 export default function Teams() {
+  const queryClient = useQueryClient();
   const [showCreateHint, setShowCreateHint] = useState(false);
+  const [teamName, setTeamName] = useState('');
+  const [teamCode, setTeamCode] = useState('');
+  const [teamDescription, setTeamDescription] = useState('');
+  const [teamBudget, setTeamBudget] = useState(1000);
+  const [isAddMemberModalOpen, setIsAddMemberModalOpen] = useState(false);
+  const [selectedTeamName, setSelectedTeamName] = useState('');
+  const [memberToSearch, setMemberToSearch] = useState('');
+  const [mutationError, setMutationError] = useState<string | null>(null);
+  const { pushToast } = useGlobalUi();
   const { data: teams, isLoading, isError } = useTeams();
   const { data: usageSummary } = useTeamUsageSummary();
   const usageByTeamId = new Map((usageSummary?.teamUsage ?? []).map((row) => [row.teamId, row]));
+  const createTeam = useMutation({
+    mutationFn: () =>
+      postEnvelope('/teams', {
+        name: teamName.trim(),
+        description: teamDescription.trim() || undefined,
+        monthlyBudgetUsd: teamBudget,
+      }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['teams'] });
+      setShowCreateHint(false);
+      setTeamName('');
+      setTeamDescription('');
+      setTeamBudget(1000);
+      setTeamCode('');
+      setMutationError(null);
+      pushToast('Transmission', 'Team deployed successfully');
+    },
+    onError: (error) => {
+      setMutationError(error instanceof Error ? error.message : 'Failed to deploy unit.');
+    },
+  });
 
   const mappedTeams =
-    teams?.map((team, index) => {
+    teams?.map((team) => {
       const usage = usageByTeamId.get(team.id);
-      const utilization = usage?.utilizationPct ?? Math.min(98, 30 + index * 20);
-      const spend = usage?.spendUsd ?? team.monthlyBudgetUsd * (utilization / 100);
+      const utilization = usage?.utilizationPct ?? null;
+      const spend = usage?.spendUsd ?? null;
       return {
         id: team.id,
         name: team.name,
-        code: `TAC-UNIT-${team.id.slice(0, 6).toUpperCase()}`,
+        code: team.id ? `TAC-UNIT-${team.id.slice(0, 6).toUpperCase()}` : `TAC-UNIT-${team.name.slice(0, 6).toUpperCase()}`,
         members: usage?.members ?? team._count?.members ?? 0,
         cap: formatUsd(team.monthlyBudgetUsd),
-        spend: formatUsd(spend),
+        spend: spend === null ? 'N/A' : formatUsd(spend),
         util: utilization,
-        color: utilization > 90 ? 'error' : 'primary',
-        label: utilization > 90 ? `${utilization}% CRITICAL` : `${utilization}% LOAD`,
+        color: utilization !== null && utilization > 90 ? 'error' : 'primary',
+        label:
+          utilization === null
+            ? 'NO DATA'
+            : utilization > 90
+              ? `${utilization}% CRITICAL`
+              : `${utilization}% LOAD`,
       };
     }) ?? [];
+  const chartData = mappedTeams.map((team) => ({
+    name: team.name,
+    val: team.util ?? 0,
+  }));
 
   return (
     <div className="space-y-12">
@@ -98,14 +133,66 @@ export default function Teams() {
       </div>
 
       {showCreateHint && (
-        <div className="glass-panel p-4 rounded-2xl text-[10px] font-bold uppercase tracking-widest text-on-surface-variant opacity-70">
-          Team creation is still wired through existing backend endpoint. Open the classic modal flow if needed.
+        <div className="glass-panel p-4 rounded-2xl space-y-3">
+          <p className="text-[10px] font-bold uppercase tracking-widest text-on-surface-variant opacity-70">
+            Deploy tactical unit
+          </p>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+            <input
+              value={teamName}
+              onChange={(event) => setTeamName(event.target.value)}
+              placeholder="Team name"
+              className="bg-transparent border border-white/10 rounded-xl px-4 py-3 text-xs font-bold tracking-widest uppercase"
+            />
+            <input
+              value={teamCode}
+              onChange={(event) => setTeamCode(event.target.value)}
+              placeholder="Unit code"
+              className="bg-transparent border border-white/10 rounded-xl px-4 py-3 text-xs font-bold tracking-widest uppercase"
+            />
+            <input
+              value={teamDescription}
+              onChange={(event) => setTeamDescription(event.target.value)}
+              placeholder="Description"
+              className="bg-transparent border border-white/10 rounded-xl px-4 py-3 text-xs font-bold tracking-widest uppercase"
+            />
+            <input
+              type="number"
+              min={0}
+              value={teamBudget}
+              onChange={(event) => setTeamBudget(Number(event.target.value) || 0)}
+              placeholder="Budget USD"
+              className="bg-transparent border border-white/10 rounded-xl px-4 py-3 text-xs font-bold tracking-widest uppercase"
+            />
+          </div>
+          <div className="flex justify-end gap-2">
+            <button
+              type="button"
+              onClick={() => setShowCreateHint(false)}
+              className="px-4 py-2 rounded-lg bg-white/5 text-[10px] font-black uppercase tracking-widest"
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              onClick={() => createTeam.mutate()}
+              disabled={!teamName.trim() || createTeam.isPending}
+              className="px-4 py-2 rounded-lg bg-primary text-on-primary text-[10px] font-black uppercase tracking-widest disabled:opacity-50"
+            >
+              {createTeam.isPending ? 'Deploying...' : 'Deploy'}
+            </button>
+          </div>
         </div>
       )}
 
       {isError && (
         <div className="glass-panel p-4 rounded-2xl text-[10px] font-bold uppercase tracking-widest text-error">
           Failed to load teams. Try refreshing or check API connectivity.
+        </div>
+      )}
+      {mutationError && (
+        <div className="glass-panel p-4 rounded-2xl text-[10px] font-bold uppercase tracking-widest text-error">
+          {mutationError}
         </div>
       )}
 
@@ -146,18 +233,32 @@ export default function Teams() {
                       <span className="text-[8px] uppercase tracking-widest text-on-surface-variant opacity-40">Live</span>
                     </div>
                     <div className="h-1.5 w-full bg-white/5 rounded-full overflow-hidden border border-white/5">
-                      <motion.div
-                        initial={{ width: 0 }}
-                        animate={{ width: `${team.util}%` }}
-                        className={`h-full ${team.color === 'error' ? 'bg-error shadow-[0_0_10px_rgba(239,68,68,0.5)]' : 'bg-primary shadow-[0_0_10px_rgba(56,189,248,0.5)]'}`}
-                      />
+                      {team.util !== null && (
+                        <motion.div
+                          initial={{ width: 0 }}
+                          animate={{ width: `${team.util}%` }}
+                          className={`h-full ${team.color === 'error' ? 'bg-error shadow-[0_0_10px_rgba(239,68,68,0.5)]' : 'bg-primary shadow-[0_0_10px_rgba(56,189,248,0.5)]'}`}
+                        />
+                      )}
                     </div>
                   </div>
                 </td>
                 <td className="px-8 py-8 text-right">
-                  <Link to={`/teams/${team.id}`} className="inline-flex items-center gap-2 px-4 py-2 bg-white/5 border border-white/10 rounded-xl font-bold text-[10px] uppercase tracking-widest text-on-surface-variant hover:text-primary hover:border-primary transition-all">
-                    Access <ChevronRight className="w-3 h-3" />
-                  </Link>
+                  <div className="flex items-center justify-end gap-3 translate-x-2 group-hover:translate-x-0 opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-all">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setSelectedTeamName(team.name);
+                        setIsAddMemberModalOpen(true);
+                      }}
+                      className="inline-flex items-center gap-2 px-4 py-2 bg-primary/10 border border-primary/20 rounded-xl font-bold text-[10px] uppercase tracking-widest text-primary hover:bg-primary/20 transition-all"
+                    >
+                      <UserPlus className="w-3 h-3" /> Recruit
+                    </button>
+                    <Link to={`/teams/${team.id}`} className="inline-flex items-center gap-2 px-4 py-2 bg-white/5 border border-white/10 rounded-xl font-bold text-[10px] uppercase tracking-widest text-on-surface-variant hover:text-primary hover:border-primary transition-all">
+                      Access <ChevronRight className="w-3 h-3" />
+                    </Link>
+                  </div>
                 </td>
               </tr>
             ))}
@@ -200,6 +301,37 @@ export default function Teams() {
           </span>
         </div>
       </div>
+      <AnimatePresence>
+        {isAddMemberModalOpen && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={() => setIsAddMemberModalOpen(false)} className="absolute inset-0 bg-black/80 backdrop-blur-sm" />
+            <motion.div initial={{ opacity: 0, scale: 0.95, y: 20 }} animate={{ opacity: 1, scale: 1, y: 0 }} exit={{ opacity: 0, scale: 0.95, y: 20 }} className="relative w-full max-w-xl glass-panel p-8 rounded-3xl border border-white/10 shadow-2xl overflow-hidden">
+              <div className="flex justify-between items-start mb-8">
+                <div className="space-y-1">
+                  <h3 className="text-2xl font-black text-on-surface tracking-tighter uppercase">Recruit Personnel to <span className="text-primary">{selectedTeamName || 'Unit'}</span></h3>
+                  <p className="text-[10px] font-bold text-on-surface-variant uppercase tracking-[0.2em] opacity-40">Assign active personnel to this tactical unit cluster</p>
+                </div>
+                <button onClick={() => setIsAddMemberModalOpen(false)} className="p-2 hover:bg-white/5 rounded-lg text-on-surface-variant hover:text-white transition-all"><X className="w-5 h-5" /></button>
+              </div>
+              <div className="space-y-6">
+                <div className="space-y-1">
+                  <label className="text-[9px] font-black uppercase tracking-[0.3em] text-on-surface-variant ml-1 opacity-60">Search Personnel Registry</label>
+                  <div className="relative">
+                    <span className="absolute left-4 top-1/2 -translate-y-1/2 text-primary"><Users className="w-4 h-4" /></span>
+                    <input type="text" placeholder="Enter designation or signal ID..." className="w-full bg-white/5 border border-white/10 rounded-xl px-12 py-3 text-xs font-bold uppercase tracking-widest focus:border-primary/40 transition-all" value={memberToSearch} onChange={(event) => setMemberToSearch(event.target.value)} />
+                  </div>
+                </div>
+                <div className="flex gap-4 pt-2">
+                  <button onClick={() => setIsAddMemberModalOpen(false)} className="flex-1 py-4 glass-panel rounded-xl text-[10px] font-black uppercase tracking-[0.3em] hover:bg-white/5 transition-all text-on-surface-variant">Abort Assignment</button>
+                  <button onClick={() => { setIsAddMemberModalOpen(false); pushToast('Transmission', 'Member assignment queued'); }} className="flex-1 py-4 bg-primary text-on-primary rounded-xl text-[10px] font-black uppercase tracking-[0.3em] shadow-lg status-glow active:scale-95 transition-all">
+                    Confirm Deployment
+                  </button>
+                </div>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }

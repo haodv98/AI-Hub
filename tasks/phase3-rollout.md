@@ -346,3 +346,14 @@
 - [ ] Daily DB backup job running và verified restore
 - [ ] Audit log viewer functional
 - [ ] Documentation hoàn chỉnh (runbook, employee guide, admin guide)
+
+---
+
+## Phase 3.5: Web-Backend Integration Stop-Loss Gate
+
+- [ ] `docs/integration/phase3-web-backend-matrix.md` được cập nhật và phản ánh đúng trạng thái action-by-action theo role.
+- [ ] Members page: create/offboard/tier/import + pagination đều map tới endpoint thật, không placeholder controls.
+- [ ] TeamDetail page: add/remove/change-tier/update-budget dùng mutation thật + invalidation rules nhất quán.
+- [ ] MemberDetail page: chỉ hiển thị actions có backend support; dead-end actions chuyển sang explicit unsupported state.
+- [ ] AuditLogs/Usage/Reports dùng shared envelope parsing và có retry/error/empty states rõ ràng.
+- [ ] Không bắt đầu Phase 4 optimization khi bất kỳ flow P0/P1 trong matrix còn `partial` hoặc `unsupported` mà chưa có quyết định chấp thuận.

@@ -19,7 +19,10 @@ import {
   User,
 } from 'lucide-react';
 import { SegmentedFilterButton } from '@/components/atoms/SegmentedFilterButton';
-import api from '@/lib/api';
+import { EmptyState, ErrorPanel } from '@/components/ui/RequestState';
+import { getPaginatedEnvelope } from '@/lib/api';
+import { useAuth } from '@/contexts/AuthContext';
+import { canUseCapability } from '@/lib/capabilities';
 
 type AuditTargetType = 'SYSTEM' | 'POLICY' | 'API_KEY' | 'USER' | 'TEAM';
 
@@ -36,44 +39,32 @@ interface AuditLogItem {
   details: Record<string, unknown>;
 }
 
-interface ApiPaginatedResponse<T> {
-  data?: T[];
-  meta?: {
-    pagination?: {
-      total: number;
-      page: number;
-      limit: number;
-      pages: number;
-    };
-  };
-}
-
 export default function AuditLogs() {
+  const { isAdmin, isTeamLead } = useAuth();
+  const role = { isAdmin, isTeamLead };
   const [expandedRow, setExpandedRow] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [typeFilter, setTypeFilter] = useState<'ALL' | AuditTargetType>('ALL');
   const [page, setPage] = useState(1);
   const limit = 20;
 
-  const { data, isLoading, isError } = useQuery({
+  const { data, isLoading, isError, refetch } = useQuery({
     queryKey: ['audit-logs', searchTerm, typeFilter, page, limit],
     queryFn: async () => {
-      const params = new URLSearchParams({
-        page: String(page),
-        limit: String(limit),
+      const result = await getPaginatedEnvelope<AuditLogItem[]>('/audit-logs', {
+        page,
+        limit,
+        ...(searchTerm.trim() ? { q: searchTerm.trim() } : {}),
+        ...(typeFilter !== 'ALL' ? { targetType: typeFilter } : {}),
       });
-      if (searchTerm.trim()) params.set('q', searchTerm.trim());
-      if (typeFilter !== 'ALL') params.set('targetType', typeFilter);
-
-      const response = await api.get<ApiPaginatedResponse<AuditLogItem>>(`/audit-logs?${params.toString()}`);
-      return response.data;
+      return result;
     },
   });
 
   const filteredLogs = useMemo(() => {
     return data?.data ?? [];
   }, [data]);
-  const totalPages = data?.meta?.pagination?.pages ?? 1;
+  const totalPages = data?.pagination?.pages ?? 1;
   const pageButtons = useMemo(() => {
     const length = Math.min(totalPages, 3);
     const start = Math.max(1, Math.min(page - 1, totalPages - length + 1));
@@ -91,15 +82,19 @@ export default function AuditLogs() {
             Immutable operation manifest. Every delta, extraction, and system shift is recorded in the Sovereign Ledger for regulatory alignment.
           </p>
         </div>
-        <button type="button" disabled className="flex items-center justify-center gap-3 px-8 py-4 bg-white/5 text-on-surface font-black text-[11px] uppercase tracking-[0.2em] rounded-xl border border-white/5 transition-all opacity-50 cursor-not-allowed">
-          <Download className="w-4 h-4" /> Export Operations Manifest
-        </button>
+        {canUseCapability(role, 'audit.export') ? (
+          <button type="button" className="flex items-center justify-center gap-3 px-8 py-4 bg-white/5 text-on-surface font-black text-[11px] uppercase tracking-[0.2em] rounded-xl border border-white/5 transition-all">
+            <Download className="w-4 h-4" /> Export Operations Manifest
+          </button>
+        ) : (
+          <div className="text-[10px] font-semibold uppercase tracking-wider text-on-surface-variant opacity-70">
+            Export not available yet
+          </div>
+        )}
       </div>
 
       {isError && (
-        <div className="glass-panel p-4 rounded-2xl text-[10px] font-bold uppercase tracking-widest text-error">
-          Failed to load audit logs from API.
-        </div>
+        <ErrorPanel message="Failed to load audit logs from API." onRetry={() => void refetch()} />
       )}
 
       <div className="grid grid-cols-1 md:grid-cols-12 gap-4">
@@ -263,8 +258,8 @@ export default function AuditLogs() {
             ))}
             {!isLoading && filteredLogs.length === 0 && (
               <tr>
-                <td colSpan={5} className="px-6 py-10 text-center text-xs font-bold uppercase tracking-widest text-on-surface-variant opacity-60">
-                  No audit entries match current query.
+                <td colSpan={5} className="px-6 py-10">
+                  <EmptyState message="No audit entries match current query." />
                 </td>
               </tr>
             )}

@@ -54,3 +54,6 @@ graphify-out/
 # Added by code-review-graph
 .code-review-graph/
 .ace-tool/
+
+# Term ui
+ai-hub-ui

@@ -1,7 +1,7 @@
 /* eslint-disable react/react-in-jsx-scope */
 import { useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import api from '@/lib/api';
+import { getEnvelope } from '@/lib/api';
 
 interface UsageHeatmapProps {
   from: string;
@@ -19,7 +19,7 @@ const DAY_LABELS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 export function UsageHeatmap({ from, to }: UsageHeatmapProps) {
   const query = useQuery<HeatmapRow[]>({
     queryKey: ['usage', 'heatmap', from, to],
-    queryFn: () => api.get(`/usage/heatmap?from=${from}&to=${to}`).then((res) => res.data.data ?? []),
+    queryFn: () => getEnvelope('/usage/heatmap', { from, to }),
   });
 
   const maxCount = useMemo(

@@ -3,9 +3,26 @@ import { motion, AnimatePresence } from 'motion/react';
 import { Sidebar } from '@/components/organisms/Sidebar';
 import { TopBar } from '@/components/organisms/TopBar';
 import { Glow } from '@/components/atoms/Glow';
+import { CommandPalette } from '@/components/global/CommandPalette';
+import { LogoutModal } from '@/components/global/LogoutModal';
+import { TransmissionToast } from '@/components/global/TransmissionToast';
+import { useGlobalUi } from '@/contexts/GlobalUiContext';
+import { useEffect } from 'react';
 
 export default function AppLayout() {
   const location = useLocation();
+  const { openCommandPalette } = useGlobalUi();
+
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key.toLowerCase() === 'k' && (event.metaKey || event.ctrlKey)) {
+        event.preventDefault();
+        openCommandPalette();
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [openCommandPalette]);
 
   return (
     <div className="min-h-screen bg-surface selection:bg-primary/30 relative overflow-hidden flex">
@@ -32,6 +49,9 @@ export default function AppLayout() {
           </AnimatePresence>
         </div>
       </main>
+      <CommandPalette />
+      <LogoutModal />
+      <TransmissionToast />
     </div>
   );
 }

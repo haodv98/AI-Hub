@@ -1,7 +1,7 @@
 /* eslint-disable react/react-in-jsx-scope */
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Key, Plus, RotateCcw, Search, Trash2 } from 'lucide-react';
+import { Key, Plus, RotateCcw, Search, ShieldCheck, Trash2 } from 'lucide-react';
 import { StatusBadge } from '@/components/ui/StatusBadge';
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 import { KeyRevealModal } from '@/components/keys/KeyRevealModal';
@@ -9,6 +9,7 @@ import { TableSkeleton } from '@/components/ui/LoadingSkeleton';
 import { SegmentedFilterButton } from '@/components/atoms/SegmentedFilterButton';
 import { formatDate } from '@/lib/utils';
 import api from '@/lib/api';
+import { useGlobalUi } from '@/contexts/GlobalUiContext';
 
 interface ApiKey {
   id: string;
@@ -57,6 +58,7 @@ export default function Keys() {
   const [showIssueHint, setShowIssueHint] = useState(false);
   const [rotatingId, setRotatingId] = useState<string | null>(null);
   const [mutationError, setMutationError] = useState<string | null>(null);
+  const { pushToast } = useGlobalUi();
 
   const revoke = useMutation({
     mutationFn: async (id: string) => api.post(`/keys/${id}/revoke`),
@@ -66,6 +68,7 @@ export default function Keys() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['keys'] });
       setRevokeTarget(null);
+      pushToast('Transmission', 'Key revoked successfully');
     },
     onError: () => {
       setMutationError('Failed to revoke key. Please retry.');
@@ -89,6 +92,7 @@ export default function Keys() {
       qc.invalidateQueries({ queryKey: ['keys'] });
       setRevealedKey(plaintext);
       setRotatingId(null);
+      pushToast('Transmission', 'Key rotated and re-issued');
     },
     onError: () => {
       setMutationError('Failed to rotate key. Please retry.');
@@ -122,6 +126,7 @@ export default function Keys() {
       setRevealedKey(plaintext);
       setIssueUserId('');
       setShowIssueHint(false);
+      pushToast('Transmission', 'New key generated');
     },
     onError: () => {
       setMutationError('Failed to issue key. Please verify userId and retry.');
@@ -155,10 +160,16 @@ export default function Keys() {
       </div>
 
       {showIssueHint && (
-        <div className="glass-panel p-4 rounded-2xl space-y-3">
-          <p className="text-[10px] font-bold uppercase tracking-widest text-on-surface-variant opacity-70">
-            Issue a new internal key for a user by entering user id.
-          </p>
+        <div className="glass-panel p-6 rounded-2xl space-y-5 border border-primary/20">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-xl bg-primary/20 flex items-center justify-center">
+              <ShieldCheck className="w-4 h-4 text-primary" />
+            </div>
+            <div>
+              <p className="text-[10px] font-black uppercase tracking-[0.2em]">Step 1: Operator Verification</p>
+              <p className="text-[10px] font-bold uppercase tracking-widest text-on-surface-variant opacity-60">Confirm target user id</p>
+            </div>
+          </div>
           <div className="flex flex-col md:flex-row gap-3">
             <input
               type="text"
@@ -173,7 +184,7 @@ export default function Keys() {
               disabled={!isValidIssueUserId || issueKey.isPending}
               className="px-6 py-3 rounded-xl bg-primary text-on-primary text-[10px] font-black uppercase tracking-widest disabled:opacity-40"
             >
-              {issueKey.isPending ? 'Issuing...' : 'Issue Key'}
+              {issueKey.isPending ? 'Step 2: Issuing...' : 'Step 2: Generate Key'}
             </button>
           </div>
         </div>
@@ -303,6 +314,7 @@ export default function Keys() {
                       <button
                         type="button"
                         aria-label={`Rotate key ${key.keyPrefix}`}
+                        title="Rotate key and reveal new plaintext once"
                         onClick={() => rotate.mutate(key.id)}
                         disabled={key.status !== 'ACTIVE' || rotatingId === key.id}
                         className="p-2 bg-white/5 hover:bg-white/10 text-on-surface-variant hover:text-primary rounded-lg transition-all disabled:opacity-20 disabled:pointer-events-none"
@@ -312,6 +324,7 @@ export default function Keys() {
                       <button
                         type="button"
                         aria-label={`Revoke key ${key.keyPrefix}`}
+                        title="Revoke this key immediately"
                         onClick={() => setRevokeTarget(key.id)}
                         disabled={key.status === 'REVOKED' || revoke.isPending}
                         className="p-2 bg-white/5 hover:bg-white/10 text-on-surface-variant hover:text-error rounded-lg transition-all disabled:opacity-20 disabled:pointer-events-none"
@@ -336,7 +349,7 @@ export default function Keys() {
 
       <ConfirmDialog
         open={revokeTarget !== null}
-        title="Terminate Token?"
+        title="Step 1: Confirm Revocation"
         description="This will immediately invalidate the key. Any integrations using it will stop working."
         confirmLabel={revoke.isPending ? 'Revoking...' : 'Confirm Purge'}
         destructive

@@ -1,5 +1,6 @@
 /* eslint-disable react/react-in-jsx-scope */
 import { useMemo, useState } from 'react';
+import { Link } from 'react-router';
 import { useQuery } from '@tanstack/react-query';
 import { motion } from 'motion/react';
 import {
@@ -28,8 +29,12 @@ import {
 import { SegmentedFilterButton } from '@/components/atoms/SegmentedFilterButton';
 import { ExportButton } from '@/components/usage/ExportButton';
 import { UsageHeatmap } from '@/components/usage/UsageHeatmap';
+import { ErrorPanel } from '@/components/ui/RequestState';
+import { useAuth } from '@/contexts/AuthContext';
+import { canUseCapability } from '@/lib/capabilities';
+import { presetToDateRange } from '@/lib/date-range';
 import { formatNumber, formatUsd } from '@/lib/utils';
-import api from '@/lib/api';
+import { getEnvelope } from '@/lib/api';
 
 interface DailySummaryRow {
   date: string;
@@ -62,32 +67,15 @@ interface OrgSummary {
 
 const COLORS = ['#38bdf8', '#0ea5e9', '#0284c7', '#0369a1', '#075985'];
 
-const RANGE_TO_DAYS: Record<'7d' | '30d' | '90d', number> = {
-  '7d': 7,
-  '30d': 30,
-  '90d': 90,
-};
-
-function rangeToDates(range: '7d' | '30d' | '90d') {
-  const to = new Date();
-  const from = new Date();
-  from.setDate(to.getDate() - (RANGE_TO_DAYS[range] - 1));
-  return {
-    from: from.toISOString().split('T')[0],
-    to: to.toISOString().split('T')[0],
-  };
-}
-
 export default function Usage() {
+  const { isAdmin, isTeamLead } = useAuth();
+  const role = { isAdmin, isTeamLead };
   const [range, setRange] = useState<'7d' | '30d' | '90d'>('7d');
-  const dateRange = useMemo(() => rangeToDates(range), [range]);
+  const dateRange = useMemo(() => presetToDateRange(range), [range]);
 
-  const { data, isLoading, isError } = useQuery<OrgSummary>({
+  const { data, isLoading, isError, refetch } = useQuery<OrgSummary>({
     queryKey: ['usage', 'summary', dateRange.from, dateRange.to],
-    queryFn: () =>
-      api
-        .get(`/usage/summary?from=${dateRange.from}&to=${dateRange.to}`)
-        .then((response) => response.data.data),
+    queryFn: () => getEnvelope('/usage/summary', { from: dateRange.from, to: dateRange.to }),
   });
 
   const dailySpend = (data?.byDay ?? []).map((row) => ({
@@ -134,14 +122,14 @@ export default function Usage() {
               />
             ))}
           </div>
-          <ExportButton from={dateRange.from} to={dateRange.to} />
+          {canUseCapability(role, 'usage.export') ? (
+            <ExportButton from={dateRange.from} to={dateRange.to} />
+          ) : null}
         </div>
       </div>
 
       {isError && (
-        <div className="glass-panel p-4 rounded-2xl text-[10px] font-bold uppercase tracking-widest text-error">
-          Failed to load usage data. Showing partial placeholders.
-        </div>
+        <ErrorPanel message="Failed to load usage data." onRetry={() => void refetch()} />
       )}
 
       <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
@@ -297,9 +285,9 @@ export default function Usage() {
                   </div>
                 </td>
                 <td className="px-8 py-8 text-right">
-                  <button type="button" className="p-2 glass-panel group-hover:text-primary transition-all rounded-lg opacity-0 group-hover:opacity-100 translate-x-2 group-hover:translate-x-0">
+                  <Link to={`/members/${user.userId}`} className="p-2 glass-panel group-hover:text-primary transition-all rounded-lg opacity-0 group-hover:opacity-100 translate-x-2 group-hover:translate-x-0">
                     <ChevronRight className="w-4 h-4" />
-                  </button>
+                  </Link>
                 </td>
               </tr>
             ))}

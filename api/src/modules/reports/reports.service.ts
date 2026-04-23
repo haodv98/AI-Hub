@@ -30,6 +30,8 @@ export interface CurrentMonthReportPreview {
 @Injectable()
 export class ReportsService {
   private readonly logger = new Logger(ReportsService.name);
+  private usageDailyAvailability: boolean | null = null;
+  private usageEventsAvailability: boolean | null = null;
 
   constructor(
     private readonly prisma: PrismaService,
@@ -80,20 +82,31 @@ export class ReportsService {
   }
 
   async listMonthlyReports(limit = 12): Promise<MonthlyReportItem[]> {
-    const rows = await this.prisma.$queryRaw<Array<{
-      month_bucket: Date;
-      generated_at: Date;
-      total_spend_usd: number;
-    }>>`
-      SELECT
-        DATE_TRUNC('month', created_at) AS month_bucket,
-        MAX(created_at)                 AS generated_at,
-        SUM(cost_usd)::float            AS total_spend_usd
-      FROM usage_events
-      GROUP BY DATE_TRUNC('month', created_at)
-      ORDER BY month_bucket DESC
-      LIMIT ${limit}
-    `;
+    const useDaily = await this.canUseUsageDaily();
+    const useEvents = await this.canUseUsageEvents();
+    if (!useDaily && !useEvents) return [];
+
+    const rows = useDaily
+      ? await this.prisma.$queryRaw<Array<{ month_bucket: Date; generated_at: Date; total_spend_usd: number }>>`
+          SELECT
+            DATE_TRUNC('month', bucket) AS month_bucket,
+            MAX(bucket)                 AS generated_at,
+            SUM(cost_usd)::float        AS total_spend_usd
+          FROM usage_daily
+          GROUP BY DATE_TRUNC('month', bucket)
+          ORDER BY month_bucket DESC
+          LIMIT ${limit}
+        `
+      : await this.prisma.$queryRaw<Array<{ month_bucket: Date; generated_at: Date; total_spend_usd: number }>>`
+          SELECT
+            DATE_TRUNC('month', created_at) AS month_bucket,
+            MAX(created_at)                 AS generated_at,
+            SUM(cost_usd)::float            AS total_spend_usd
+          FROM usage_events
+          GROUP BY DATE_TRUNC('month', created_at)
+          ORDER BY month_bucket DESC
+          LIMIT ${limit}
+        `;
 
     return rows.map((row) => ({
       month: row.month_bucket.toISOString().slice(0, 7),
@@ -106,20 +119,36 @@ export class ReportsService {
   async getCurrentMonthPreview(from?: Date, to?: Date): Promise<CurrentMonthReportPreview> {
     const rangeFrom = from ?? startOfMonth(new Date());
     const rangeTo = to ?? new Date();
+    const useDaily = await this.canUseUsageDaily();
+    const useEvents = await this.canUseUsageEvents();
+    if (!useDaily && !useEvents) {
+      return {
+        month: rangeFrom.toISOString().slice(0, 7),
+        totalSpendUsd: 0,
+        totalRequests: 0,
+        averageLatencyMs: 0,
+      };
+    }
 
-    const [summary] = await this.prisma.$queryRaw<Array<{
-      total_spend_usd: number | null;
-      total_requests: number | null;
-      avg_latency_ms: number | null;
-    }>>`
-      SELECT
-        SUM(cost_usd)::float    AS total_spend_usd,
-        COUNT(*)::int           AS total_requests,
-        AVG(latency_ms)::float  AS avg_latency_ms
-      FROM usage_events
-      WHERE created_at >= ${rangeFrom}
-        AND created_at <= ${rangeTo}
-    `;
+    const [summary] = useDaily
+      ? await this.prisma.$queryRaw<Array<{ total_spend_usd: number | null; total_requests: number | null; avg_latency_ms: number | null }>>`
+          SELECT
+            SUM(cost_usd)::float      AS total_spend_usd,
+            SUM(request_count)::int   AS total_requests,
+            NULL::float               AS avg_latency_ms
+          FROM usage_daily
+          WHERE bucket >= ${rangeFrom}
+            AND bucket <= ${rangeTo}
+        `
+      : await this.prisma.$queryRaw<Array<{ total_spend_usd: number | null; total_requests: number | null; avg_latency_ms: number | null }>>`
+          SELECT
+            SUM(cost_usd)::float    AS total_spend_usd,
+            COUNT(*)::int           AS total_requests,
+            AVG(latency_ms)::float  AS avg_latency_ms
+          FROM usage_events
+          WHERE created_at >= ${rangeFrom}
+            AND created_at <= ${rangeTo}
+        `;
 
     return {
       month: rangeFrom.toISOString().slice(0, 7),
@@ -141,6 +170,32 @@ export class ReportsService {
       totalSpendUsd: preview.totalSpendUsd,
     });
     this.logger.log(`Monthly report job completed for ${month}`);
+  }
+
+  private async canUseUsageDaily(): Promise<boolean> {
+    if (this.usageDailyAvailability !== null) return this.usageDailyAvailability;
+    try {
+      const rows = await this.prisma.$queryRaw<Array<{ exists: string | null }>>`
+        SELECT to_regclass('usage_daily')::text AS exists
+      `;
+      this.usageDailyAvailability = Boolean(rows[0]?.exists);
+    } catch {
+      this.usageDailyAvailability = false;
+    }
+    return this.usageDailyAvailability;
+  }
+
+  private async canUseUsageEvents(): Promise<boolean> {
+    if (this.usageEventsAvailability !== null) return this.usageEventsAvailability;
+    try {
+      const rows = await this.prisma.$queryRaw<Array<{ exists: string | null }>>`
+        SELECT to_regclass('usage_events')::text AS exists
+      `;
+      this.usageEventsAvailability = Boolean(rows[0]?.exists);
+    } catch {
+      this.usageEventsAvailability = false;
+    }
+    return this.usageEventsAvailability;
   }
 }
 

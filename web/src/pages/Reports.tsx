@@ -1,7 +1,8 @@
 /* eslint-disable react/react-in-jsx-scope */
 import { useQuery } from '@tanstack/react-query';
 import { FileText, RefreshCw } from 'lucide-react';
-import api from '@/lib/api';
+import { EmptyState, ErrorPanel } from '@/components/ui/RequestState';
+import { getEnvelope } from '@/lib/api';
 import { formatUsd } from '@/lib/utils';
 
 interface MonthlyReport {
@@ -21,12 +22,12 @@ interface Preview {
 export default function Reports() {
   const reportsQuery = useQuery<MonthlyReport[]>({
     queryKey: ['reports', 'list'],
-    queryFn: () => api.get('/reports?limit=12').then((res) => res.data.data ?? []),
+    queryFn: () => getEnvelope('/reports?limit=12'),
   });
 
   const previewQuery = useQuery<Preview>({
     queryKey: ['reports', 'preview-current-month'],
-    queryFn: () => api.get('/reports/preview/current-month').then((res) => res.data.data),
+    queryFn: () => getEnvelope('/reports/preview/current-month'),
   });
 
   return (
@@ -41,6 +42,16 @@ export default function Reports() {
           </p>
         </div>
       </div>
+
+      {(reportsQuery.isError || previewQuery.isError) && (
+        <ErrorPanel
+          message="Failed to load reports."
+          onRetry={() => {
+            reportsQuery.refetch();
+            previewQuery.refetch();
+          }}
+        />
+      )}
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         <div className="glass-panel rounded-2xl p-5">
@@ -96,8 +107,8 @@ export default function Reports() {
             ))}
             {!reportsQuery.isLoading && (reportsQuery.data?.length ?? 0) === 0 && (
               <tr>
-                <td colSpan={4} className="px-8 py-8 text-xs text-on-surface-variant">
-                  No report snapshots available yet.
+                <td colSpan={4} className="px-8 py-8">
+                  <EmptyState message="No report snapshots available yet." />
                 </td>
               </tr>
             )}

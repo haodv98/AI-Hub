@@ -23,8 +23,12 @@ import {
 import { StatusBadge } from '@/components/ui/StatusBadge';
 import { StatCard } from '@/components/ui/StatCard';
 import { TableSkeleton } from '@/components/ui/LoadingSkeleton';
+import { EmptyState, ErrorPanel } from '@/components/ui/RequestState';
+import { useAuth } from '@/contexts/AuthContext';
 import { formatUsd, formatNumber, formatDate } from '@/lib/utils';
-import api from '@/lib/api';
+import { canUseCapability } from '@/lib/capabilities';
+import { monthToDateRange } from '@/lib/date-range';
+import { getEnvelope, postEnvelope } from '@/lib/api';
 
 interface ApiKey {
   id: string;
@@ -69,19 +73,16 @@ interface UsageSummaryRow {
 function useMemberDetail(id: string) {
   return useQuery<MemberDetail>({
     queryKey: ['members', id],
-    queryFn: () => api.get(`/users/${id}`).then((r) => r.data.data),
+    queryFn: () => getEnvelope(`/users/${id}`),
     enabled: !!id,
   });
 }
 
 function useMemberUsage(id: string) {
-  const now = new Date();
-  const from = new Date(now.getFullYear(), now.getMonth() - 1, 1).toISOString().split('T')[0];
-  const to = now.toISOString().split('T')[0];
+  const { from, to } = monthToDateRange();
   return useQuery<UsageSummaryRow[]>({
     queryKey: ['usage', 'user', id, from, to],
-    queryFn: () =>
-      api.get(`/usage?userId=${id}&from=${from}&to=${to}`).then((r) => r.data.data ?? []),
+    queryFn: () => getEnvelope(`/usage`, { userId: id, from, to }),
     enabled: !!id,
   });
 }
@@ -90,9 +91,7 @@ function useEffectivePolicy(id: string) {
   return useQuery<EffectivePolicy | null>({
     queryKey: ['policies', 'resolve', id],
     queryFn: () =>
-      api
-        .get(`/policies/resolve?userId=${id}`)
-        .then((r) => r.data.data)
+      getEnvelope<EffectivePolicy>(`/policies/resolve`, { userId: id })
         .catch(() => null),
     enabled: !!id,
   });
@@ -118,18 +117,27 @@ function SpendTooltip({
 
 export default function MemberDetail() {
   const qc = useQueryClient();
+  const { isAdmin, isTeamLead } = useAuth();
+  const role = { isAdmin, isTeamLead };
   const { id } = useParams<{ id: string }>();
-  const { data: member, isLoading } = useMemberDetail(id!);
-  const { data: usageRows, isLoading: usageLoading } = useMemberUsage(id!);
+  const memberQuery = useMemberDetail(id!);
+  const usageQuery = useMemberUsage(id!);
+  const { data: member, isLoading } = memberQuery;
+  const { data: usageRows, isLoading: usageLoading } = usageQuery;
   const { data: policy } = useEffectivePolicy(id!);
   const [provider, setProvider] = useState<'ANTHROPIC' | 'OPENAI' | 'GOOGLE'>('ANTHROPIC');
   const [apiKey, setApiKey] = useState('');
+  const [mutationError, setMutationError] = useState<string | null>(null);
 
   const assignPerSeatKey = useMutation({
-    mutationFn: () => api.post(`/users/${id}/provider-keys/assign`, { provider, apiKey }),
+    mutationFn: () => postEnvelope(`/users/${id}/provider-keys/assign`, { provider, apiKey }),
     onSuccess: () => {
       setApiKey('');
       qc.invalidateQueries({ queryKey: ['members', id] });
+      setMutationError(null);
+    },
+    onError: (error) => {
+      setMutationError(error instanceof Error ? error.message : 'Failed to assign provider key.');
     },
   });
 
@@ -191,22 +199,22 @@ export default function MemberDetail() {
           </div>
         </div>
         <div className="flex gap-4 relative z-10 w-full md:w-auto">
-          <button
-            type="button"
-            disabled
-            className="flex-1 md:flex-initial bg-primary/60 text-on-primary px-8 py-3.5 text-[10px] font-bold uppercase tracking-[0.2em] rounded-xl cursor-not-allowed"
-          >
-            Issue Pulse
-          </button>
-          <button
-            type="button"
-            onClick={() => setApiKey('')}
-            className="flex-1 md:flex-initial glass-panel hover:bg-white/10 text-error px-8 py-3.5 text-[10px] font-bold uppercase tracking-[0.2em] transition-all active:scale-95 rounded-xl border-error/30"
-          >
-            Revoke access
-          </button>
+          <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-on-surface-variant opacity-70">
+            Key revoke/rotate action is managed in key lifecycle module
+          </p>
         </div>
       </section>
+
+      {(memberQuery.isError || usageQuery.isError) && (
+        <ErrorPanel
+          message="Failed to load member details."
+          onRetry={() => {
+            memberQuery.refetch();
+            usageQuery.refetch();
+          }}
+        />
+      )}
+      {mutationError && <ErrorPanel message={mutationError} onRetry={() => setMutationError(null)} />}
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
         <div className="lg:col-span-2 glass-panel p-8 rounded-3xl relative overflow-hidden">
@@ -323,15 +331,19 @@ export default function MemberDetail() {
                     <StatusBadge status={key.status} />
                   </td>
                   <td className="py-5 text-right">
-                    <button
-                      type="button"
-                      className={`text-[9px] font-black text-primary uppercase tracking-[0.2em] border border-primary/20 bg-primary/5 px-3 py-1.5 rounded-lg hover:bg-primary hover:text-on-primary transition-all ${key.status === 'REVOKED' && 'opacity-20 pointer-events-none'}`}
-                    >
-                      Rotate
-                    </button>
+                    <span className="text-[9px] uppercase tracking-[0.2em] text-on-surface-variant opacity-60">
+                      Managed by API key module
+                    </span>
                   </td>
                 </tr>
               ))}
+              {(member.apiKeys ?? []).length === 0 && (
+                <tr>
+                  <td colSpan={4} className="py-5">
+                    <EmptyState message="No active operational keys" />
+                  </td>
+                </tr>
+              )}
             </tbody>
           </table>
         </div>
@@ -339,12 +351,9 @@ export default function MemberDetail() {
         <div className="glass-panel p-8 rounded-3xl relative overflow-hidden group">
           <div className="flex justify-between items-center mb-10">
             <h3 className="text-xl font-bold uppercase tracking-tight">Assigned Clusters</h3>
-            <button
-              type="button"
-              className="text-[10px] font-black text-primary uppercase tracking-[0.2em] bg-white/5 px-4 py-2 rounded-xl hover:bg-primary hover:text-on-primary transition-all"
-            >
-              Link Node
-            </button>
+            <span className="text-[10px] font-black text-on-surface-variant uppercase tracking-[0.2em] opacity-60">
+              Managed in provider key assignment
+            </span>
           </div>
           <div className="space-y-4">
             <div className="p-6 bg-white/5 border border-white/5 border-l-4 border-primary flex justify-between items-center rounded-2xl group/card relative overflow-hidden hover:bg-white/10 transition-all">
@@ -365,7 +374,7 @@ export default function MemberDetail() {
                 <span className="text-[10px] font-black text-primary uppercase mb-2 tracking-[0.2em]">
                   OVERSIGHT_TIER
                 </span>
-                <CircleX className="w-5 h-5 text-on-surface-variant cursor-pointer hover:text-error transition-colors" />
+                <CircleX className="w-5 h-5 text-on-surface-variant opacity-40" />
               </div>
             </div>
 
@@ -441,7 +450,8 @@ export default function MemberDetail() {
             )}
           </div>
 
-          <div className="space-y-2">
+          {canUseCapability(role, 'member.assignProviderKey') ? (
+            <div className="space-y-2">
             <select
               value={provider}
               onChange={(e) => setProvider(e.target.value as 'ANTHROPIC' | 'OPENAI' | 'GOOGLE')}
@@ -465,7 +475,10 @@ export default function MemberDetail() {
             >
               {assignPerSeatKey.isPending ? 'Assigning…' : 'Assign Seat Key'}
             </button>
-          </div>
+            </div>
+          ) : (
+            <EmptyState message="Provider key assignment is available for admin role only." />
+          )}
         </div>
       </div>
 

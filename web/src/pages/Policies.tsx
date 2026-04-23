@@ -1,13 +1,14 @@
 /* eslint-disable react/react-in-jsx-scope */
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { motion, AnimatePresence } from 'motion/react';
-import { ArrowRightLeft, CheckCircle2, ChevronLeft, Database, Edit2, Plus, Search, Trash2, Zap } from 'lucide-react';
+import { Activity, ArrowRightLeft, CheckCircle2, ChevronLeft, Database, Edit2, Info, Plus, Search, Sliders, Trash2, Zap } from 'lucide-react';
+import { useSearchParams } from 'react-router';
 import { PolicyScopeFilterButton } from '@/components/atoms/PolicyScopeFilterButton';
 import { PolicyToggleButton } from '@/components/atoms/PolicyToggleButton';
-import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 import { ENGINES } from '@/common/constants';
 import api from '@/lib/api';
+import { useGlobalUi } from '@/contexts/GlobalUiContext';
 
 type PolicyScope = 'ORG' | 'TEAM' | 'ROLE' | 'USER';
 
@@ -139,12 +140,13 @@ export default function Policies() {
   const [localToggles, setLocalToggles] = useState<Record<string, boolean>>({});
   const [editorSelectedEngines, setEditorSelectedEngines] = useState<string[]>([]);
   const [formState, setFormState] = useState<PolicyFormState>(toFormState());
+  const [editorTab, setEditorTab] = useState<'CONFIG' | 'SIMULATION'>('CONFIG');
   const [toggleError, setToggleError] = useState<string | null>(null);
   const [editorError, setEditorError] = useState<string | null>(null);
-  const [deleteTargetId, setDeleteTargetId] = useState<string | null>(null);
+  const [searchParams, setSearchParams] = useSearchParams();
+  const { pushToast } = useGlobalUi();
 
   const policies = data ?? [];
-  const selectedPolicy = policies.find((p) => p.id === selectedPolicyId) ?? null;
   const filteredPolicies = useMemo(() => {
     return policies.filter((policy) => {
       const matchSearch =
@@ -209,6 +211,7 @@ export default function Policies() {
       setEditorSelectedEngines([]);
       setFormState(toFormState());
       setEditorError(null);
+      setSearchParams({});
     },
     onError: () => {
       setEditorError('Failed to save policy configuration. Please verify fields and retry.');
@@ -221,7 +224,7 @@ export default function Policies() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['policies'] });
-      setDeleteTargetId(null);
+      pushToast('Transmission', 'Policy detached from manifest');
     },
     onError: () => {
       setEditorError('Failed to delete policy. Please retry.');
@@ -234,8 +237,21 @@ export default function Policies() {
     setEditorSelectedEngines(editingPolicy?.allowedModels ?? []);
     setFormState(toFormState(editingPolicy ?? undefined));
     setEditorError(null);
+    setEditorTab('CONFIG');
+    setSearchParams({ manifest: policyId });
     setView('EDITOR');
   };
+
+  useEffect(() => {
+    const manifestId = searchParams.get('manifest');
+    if (!manifestId || !policies.length) return;
+    const matched = policies.find((policy) => policy.id === manifestId);
+    if (!matched) return;
+    setSelectedPolicyId(matched.id);
+    setEditorSelectedEngines(matched.allowedModels ?? []);
+    setFormState(toFormState(matched));
+    setView('EDITOR');
+  }, [policies, searchParams]);
 
   return (
     <div className="space-y-6">
@@ -258,6 +274,8 @@ export default function Policies() {
                   setEditorSelectedEngines([]);
                   setFormState(toFormState());
                   setEditorError(null);
+                  setEditorTab('CONFIG');
+                  setSearchParams({});
                   setView('EDITOR');
                 }}
                 className="flex items-center justify-center gap-3 px-8 py-4 bg-primary hover:bg-primary-dim text-on-primary font-bold text-[11px] uppercase tracking-[0.2em] rounded-xl shadow-xl active:scale-95 transition-all status-glow"
@@ -382,7 +400,12 @@ export default function Policies() {
                             <button type="button" onClick={() => handleEdit(policy.id)} className="p-2 glass-panel hover:text-primary transition-all rounded-lg">
                               <Edit2 className="w-4 h-4" />
                             </button>
-                            <button type="button" onClick={() => setDeleteTargetId(policy.id)} className="p-2 glass-panel hover:text-error transition-all rounded-lg">
+                            <button
+                              type="button"
+                              onClick={() => deletePolicyMutation.mutate(policy.id)}
+                              title="Detach protocol instantly"
+                              className="p-2 glass-panel hover:text-error transition-all rounded-lg"
+                            >
                               <Trash2 className="w-4 h-4" />
                             </button>
                           </div>
@@ -411,221 +434,158 @@ export default function Policies() {
               >
                 <ChevronLeft className="w-4 h-4" /> Return to Manifest
               </button>
-            </div>
-
-            <div className="glass-panel p-8 rounded-3xl space-y-8">
-              <h3 className="text-xl font-black uppercase tracking-tight">Policy Configuration</h3>
-              <p className="text-[11px] text-on-surface-variant uppercase tracking-widest opacity-60">
-                {selectedPolicy
-                  ? `Editing "${selectedPolicy.name}" (${selectedPolicy.scope})`
-                  : 'Create a new policy with full limits and fallback settings.'}
-              </p>
-
-              {editorError && (
-                <div className="glass-panel p-4 rounded-2xl text-[10px] font-bold uppercase tracking-widest text-error">
-                  {editorError}
-                </div>
-              )}
-
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <input
-                  type="text"
-                  value={formState.name}
-                  onChange={(event) => setFormState((prev) => ({ ...prev, name: event.target.value }))}
-                  placeholder="Policy name"
-                  className="bg-transparent border border-white/10 rounded-xl px-4 py-3 text-xs font-bold uppercase tracking-widest"
-                />
-                <select
-                  value={formState.scope}
-                  onChange={(event) =>
-                    setFormState((prev) => ({ ...prev, scope: event.target.value as PolicyScope }))
-                  }
-                  className="bg-transparent border border-white/10 rounded-xl px-4 py-3 text-xs font-bold uppercase tracking-widest"
-                >
-                  <option value="ORG">ORG</option>
-                  <option value="TEAM">TEAM</option>
-                  <option value="ROLE">ROLE</option>
-                  <option value="USER">USER</option>
-                </select>
-                <input
-                  type="text"
-                  value={formState.target}
-                  onChange={(event) => setFormState((prev) => ({ ...prev, target: event.target.value }))}
-                  placeholder={formState.scope === 'ORG' ? 'Optional' : 'Target ID (teamId/userId)'}
-                  className="bg-transparent border border-white/10 rounded-xl px-4 py-3 text-xs font-bold uppercase tracking-widest"
-                />
-                <input
-                  type="number"
-                  min={0}
-                  value={formState.priority}
-                  onChange={(event) =>
-                    setFormState((prev) => ({ ...prev, priority: Number(event.target.value) || 0 }))
-                  }
-                  placeholder="Priority"
-                  className="bg-transparent border border-white/10 rounded-xl px-4 py-3 text-xs font-bold uppercase tracking-widest"
-                />
-              </div>
-
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                <input
-                  type="number"
-                  min={0}
-                  value={formState.limits.rpm}
-                  onChange={(event) =>
-                    setFormState((prev) => ({
-                      ...prev,
-                      limits: { ...prev.limits, rpm: Number(event.target.value) || 0 },
-                    }))
-                  }
-                  placeholder="RPM"
-                  className="bg-transparent border border-white/10 rounded-xl px-4 py-3 text-xs font-bold uppercase tracking-widest"
-                />
-                <input
-                  type="number"
-                  min={0}
-                  value={formState.limits.dailyTokens}
-                  onChange={(event) =>
-                    setFormState((prev) => ({
-                      ...prev,
-                      limits: { ...prev.limits, dailyTokens: Number(event.target.value) || 0 },
-                    }))
-                  }
-                  placeholder="Daily Tokens"
-                  className="bg-transparent border border-white/10 rounded-xl px-4 py-3 text-xs font-bold uppercase tracking-widest"
-                />
-                <input
-                  type="number"
-                  min={0}
-                  value={formState.limits.monthlyBudget}
-                  onChange={(event) =>
-                    setFormState((prev) => ({
-                      ...prev,
-                      limits: { ...prev.limits, monthlyBudget: Number(event.target.value) || 0 },
-                    }))
-                  }
-                  placeholder="Monthly Budget USD"
-                  className="bg-transparent border border-white/10 rounded-xl px-4 py-3 text-xs font-bold uppercase tracking-widest"
-                />
-              </div>
-
-              <div className="space-y-4">
-                <label className="text-[9px] font-black uppercase tracking-[0.3em] text-on-surface-variant opacity-60 ml-1">
-                  Authorized Compute Engines
-                </label>
-                <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-                  {ENGINES.map((engine) => (
-                    <button
-                      key={engine}
-                      type="button"
-                      onClick={() =>
-                        setEditorSelectedEngines((prev) =>
-                          prev.includes(engine)
-                            ? prev.filter((item) => item !== engine)
-                            : [...prev, engine],
-                        )
-                      }
-                      className={`px-4 py-3 text-[10px] font-bold uppercase tracking-wider rounded-xl border transition-all text-left flex items-center justify-between ${
-                        editorSelectedEngines.includes(engine)
-                          ? 'bg-primary/20 border-primary/30 text-primary shadow-[0_0_10px_rgba(56,189,248,0.1)]'
-                          : 'bg-white/5 border-white/5 text-on-surface-variant hover:border-white/10'
-                      }`}
-                    >
-                      {engine}
-                      <CheckCircle2 className={`w-3 h-3 ${editorSelectedEngines.includes(engine) ? 'opacity-100' : 'opacity-40'}`} />
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              <div className="glass-panel p-6 rounded-2xl border border-primary/20 space-y-3">
-                <h4 className="text-[10px] font-black uppercase tracking-[0.3em] text-primary flex items-center gap-2">
-                  <ArrowRightLeft className="w-4 h-4" /> Fallback Configuration
-                </h4>
-                <label className="flex items-center gap-2 text-[10px] font-bold uppercase tracking-widest text-on-surface-variant">
-                  <input
-                    type="checkbox"
-                    checked={formState.fallback.enabled}
-                    onChange={(event) =>
-                      setFormState((prev) => ({
-                        ...prev,
-                        fallback: { ...prev.fallback, enabled: event.target.checked },
-                      }))
-                    }
-                  />
-                  Enable fallback
-                </label>
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                  <input
-                    type="number"
-                    min={0}
-                    max={100}
-                    value={formState.fallback.threshold}
-                    onChange={(event) =>
-                      setFormState((prev) => ({
-                        ...prev,
-                        fallback: { ...prev.fallback, threshold: Number(event.target.value) || 0 },
-                      }))
-                    }
-                    placeholder="Threshold %"
-                    className="bg-transparent border border-white/10 rounded-xl px-4 py-3 text-xs font-bold uppercase tracking-widest"
-                  />
-                  <input
-                    type="text"
-                    value={formState.fallback.fromModel}
-                    onChange={(event) =>
-                      setFormState((prev) => ({
-                        ...prev,
-                        fallback: { ...prev.fallback, fromModel: event.target.value },
-                      }))
-                    }
-                    placeholder="From model"
-                    className="bg-transparent border border-white/10 rounded-xl px-4 py-3 text-xs font-bold uppercase tracking-widest"
-                  />
-                  <input
-                    type="text"
-                    value={formState.fallback.toModel}
-                    onChange={(event) =>
-                      setFormState((prev) => ({
-                        ...prev,
-                        fallback: { ...prev.fallback, toModel: event.target.value },
-                      }))
-                    }
-                    placeholder="To model"
-                    className="bg-transparent border border-white/10 rounded-xl px-4 py-3 text-xs font-bold uppercase tracking-widest"
-                  />
-                </div>
-              </div>
-
-              <div className="flex justify-end gap-3">
+              <div className="flex gap-3">
                 <button
                   type="button"
-                  onClick={() => setView('LIST')}
-                  className="px-6 py-3 rounded-xl bg-white/5 text-on-surface-variant text-[10px] font-black uppercase tracking-widest"
+                  onClick={() => setEditorTab('CONFIG')}
+                  className={`px-6 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${editorTab === 'CONFIG' ? 'bg-white/10 text-primary border border-primary/20' : 'text-on-surface-variant'}`}
                 >
-                  Cancel
+                  Configuration
                 </button>
+                <button
+                  type="button"
+                  onClick={() => setEditorTab('SIMULATION')}
+                  className={`px-6 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${editorTab === 'SIMULATION' ? 'bg-white/10 text-primary border border-primary/20' : 'text-on-surface-variant'}`}
+                >
+                  Tactical Simulation
+                </button>
+              </div>
+            </div>
+            <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
+              <AnimatePresence mode="wait">
+                {editorTab === 'CONFIG' ? (
+                  <motion.div key="config" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }} className="lg:col-span-8 space-y-6">
+                    <div className="glass-panel p-6 rounded-3xl space-y-6">
+                      <div className="flex justify-between items-center">
+                        <div>
+                          <h3 className="text-lg font-black uppercase tracking-tight">Identity Designation</h3>
+                          <p className="text-[10px] text-on-surface-variant font-bold uppercase tracking-widest opacity-40">Define protocol scope and target subjects</p>
+                        </div>
+                        <div className="p-3 rounded-2xl border bg-primary/20 border-primary/20 text-primary">
+                          <Activity className="w-5 h-5" />
+                        </div>
+                      </div>
+                      {editorError && <div className="glass-panel p-4 rounded-2xl text-[10px] font-bold uppercase tracking-widest text-error">{editorError}</div>}
+                      <div className="grid grid-cols-1 md:grid-cols-12 gap-4">
+                        <div className="md:col-span-8 space-y-2">
+                          <label className="text-[9px] font-black uppercase tracking-[0.3em] text-on-surface-variant opacity-60 ml-1">Protocol Identifier</label>
+                          <input type="text" value={formState.name} onChange={(event) => setFormState((prev) => ({ ...prev, name: event.target.value }))} placeholder="e.g., Fleet Master Allocation" className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3.5 text-xs font-bold uppercase tracking-widest focus:border-primary/40 transition-all" />
+                        </div>
+                        <div className="md:col-span-4 space-y-2">
+                          <label className="text-[9px] font-black uppercase tracking-[0.3em] text-on-surface-variant opacity-60 ml-1">Priority [0-100]</label>
+                          <input type="number" min={0} value={formState.priority} onChange={(event) => setFormState((prev) => ({ ...prev, priority: Number(event.target.value) || 0 }))} className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3.5 text-xs font-bold uppercase tracking-widest focus:border-primary/40 transition-all text-center font-mono" />
+                        </div>
+                      </div>
+                      <div className="grid grid-cols-1 md:grid-cols-12 gap-4">
+                        <div className="md:col-span-5 space-y-2">
+                          <label className="text-[9px] font-black uppercase tracking-[0.3em] text-on-surface-variant opacity-60 ml-1">Deployment Scope</label>
+                          <div className="flex gap-1 bg-white/5 p-1 rounded-xl border border-white/10">
+                            {(['ORG', 'TEAM', 'ROLE', 'USER'] as const).map((scope) => (
+                              <button key={scope} type="button" onClick={() => setFormState((prev) => ({ ...prev, scope }))} className={`flex-1 py-2 text-[8px] font-black uppercase tracking-widest rounded transition-all ${formState.scope === scope ? 'bg-primary text-on-primary shadow-xl' : 'text-on-surface-variant hover:bg-white/5'}`}>{scope}</button>
+                            ))}
+                          </div>
+                        </div>
+                        <div className="md:col-span-7 space-y-2">
+                          <label className="text-[9px] font-black uppercase tracking-[0.3em] text-on-surface-variant opacity-60 ml-1">Target Subject IDs</label>
+                          <input type="text" value={formState.target} onChange={(event) => setFormState((prev) => ({ ...prev, target: event.target.value }))} placeholder="OPERATOR, TEAM-ALPHA, user_882..." className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3.5 text-[10px] font-bold uppercase tracking-widest focus:border-primary/40 transition-all font-mono" />
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="glass-panel p-6 rounded-3xl space-y-6">
+                      <h3 className="text-lg font-black uppercase tracking-tight flex items-center gap-3"><Zap className="text-primary w-5 h-5" /> Resource Boundaries</h3>
+                      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                        <input type="number" min={0} value={formState.limits.rpm} onChange={(event) => setFormState((prev) => ({ ...prev, limits: { ...prev.limits, rpm: Number(event.target.value) || 0 } }))} placeholder="Max Signal Burst [RPM]" className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-xs font-bold uppercase tracking-widest focus:border-primary/40 transition-all" />
+                        <input type="number" min={0} value={formState.limits.dailyTokens} onChange={(event) => setFormState((prev) => ({ ...prev, limits: { ...prev.limits, dailyTokens: Number(event.target.value) || 0 } }))} placeholder="Daily Cap [Tokens]" className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-xs font-bold uppercase tracking-widest focus:border-primary/40 transition-all" />
+                        <input type="number" min={0} value={formState.limits.monthlyBudget} onChange={(event) => setFormState((prev) => ({ ...prev, limits: { ...prev.limits, monthlyBudget: Number(event.target.value) || 0 } }))} placeholder="Monthly Credit [$]" className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-xs font-bold uppercase tracking-widest focus:border-primary/40 transition-all" />
+                      </div>
+                      <div className="space-y-3">
+                        <label className="text-[9px] font-black uppercase tracking-[0.3em] text-on-surface-variant opacity-60 ml-1">Authorized Compute Engines</label>
+                        <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+                          {ENGINES.map((engine) => (
+                            <button
+                              key={engine}
+                              type="button"
+                              onClick={() => setEditorSelectedEngines((prev) => (prev.includes(engine) ? prev.filter((item) => item !== engine) : [...prev, engine]))}
+                              className={`px-3 py-2.5 text-[9px] font-bold uppercase tracking-wider rounded-xl border transition-all text-left flex items-center justify-between ${editorSelectedEngines.includes(engine) ? 'bg-primary/10 border-primary/30 text-primary' : 'bg-white/5 border-white/10 text-on-surface-variant hover:border-white/20'}`}
+                            >
+                              <span className="truncate">{engine}</span>
+                              <CheckCircle2 className={`w-3 h-3 ${editorSelectedEngines.includes(engine) ? 'opacity-100' : 'opacity-40'}`} />
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="glass-panel p-6 rounded-3xl space-y-4 border border-primary/20">
+                      <h4 className="text-[10px] font-black uppercase tracking-[0.3em] text-primary flex items-center gap-2"><ArrowRightLeft className="w-4 h-4" /> Failover Protocol</h4>
+                      <label className="flex items-center gap-2 text-[10px] font-bold uppercase tracking-widest text-on-surface-variant">
+                        <input type="checkbox" checked={formState.fallback.enabled} onChange={(event) => setFormState((prev) => ({ ...prev, fallback: { ...prev.fallback, enabled: event.target.checked } }))} />
+                        Enable failover
+                      </label>
+                      {formState.fallback.enabled && (
+                        <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                          <input type="number" min={0} max={100} value={formState.fallback.threshold} onChange={(event) => setFormState((prev) => ({ ...prev, fallback: { ...prev.fallback, threshold: Number(event.target.value) || 0 } }))} placeholder="Saturation Threshold [%]" className="bg-transparent border border-white/10 rounded-xl px-4 py-3 text-xs font-bold uppercase tracking-widest" />
+                          <input type="text" value={formState.fallback.fromModel} onChange={(event) => setFormState((prev) => ({ ...prev, fallback: { ...prev.fallback, fromModel: event.target.value } }))} placeholder="From Engine" className="bg-transparent border border-white/10 rounded-xl px-4 py-3 text-xs font-bold uppercase tracking-widest" />
+                          <input type="text" value={formState.fallback.toModel} onChange={(event) => setFormState((prev) => ({ ...prev, fallback: { ...prev.fallback, toModel: event.target.value } }))} placeholder="To Engine [Failover]" className="bg-transparent border border-white/10 rounded-xl px-4 py-3 text-xs font-bold uppercase tracking-widest" />
+                        </div>
+                      )}
+                    </div>
+                  </motion.div>
+                ) : (
+                  <motion.div key="simulation" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }} className="lg:col-span-8 space-y-6">
+                    <div className="glass-panel p-10 rounded-3xl border border-primary/20">
+                      <h3 className="text-3xl font-black uppercase tracking-tighter mb-4 text-primary">Simulation <span className="text-on-surface">Matrix</span></h3>
+                      <p className="text-xs text-on-surface-variant font-bold uppercase tracking-widest leading-relaxed opacity-60">
+                        Predict cluster impact and resource consumption based on configured protocol parameters.
+                      </p>
+                    </div>
+                    <div className="p-8 bg-error/5 border border-error/20 rounded-3xl flex gap-6">
+                      <div className="space-y-2">
+                        <h4 className="text-lg font-black uppercase tracking-tight text-error">Anomalous Spike Prediction</h4>
+                        <p className="text-[11px] font-bold text-on-surface-variant uppercase tracking-widest leading-relaxed opacity-60">
+                          Simulation data is placeholder until policy analytics endpoint is available.
+                        </p>
+                      </div>
+                    </div>
+                  </motion.div>
+                )}
+              </AnimatePresence>
+
+              <div className="lg:col-span-4 space-y-8">
+                <div className="glass-panel p-8 rounded-3xl space-y-6">
+                  <h3 className="text-xl font-black uppercase tracking-tight flex items-center gap-3"><Sliders className="text-primary w-5 h-5" /> Hierarchy Layering</h3>
+                  <div className="space-y-4">
+                    {[
+                      'USER Level - Highest precision',
+                      'ROLE Cluster - Inherited by assigned agents',
+                      'TEAM Tactical - Unit-wide boundaries',
+                      'ORG Global - Baseline logic',
+                    ].map((layer) => (
+                      <p key={layer} className="text-[10px] font-black uppercase tracking-widest text-on-surface-variant">{layer}</p>
+                    ))}
+                  </div>
+                  <div className="p-4 bg-primary/5 border border-primary/20 rounded-2xl flex gap-3">
+                    <Info className="text-primary w-4 h-4 flex-shrink-0" />
+                    <p className="text-[10px] font-bold text-on-surface-variant uppercase tracking-widest leading-relaxed">
+                      Rules are evaluated top-down; first match is enforced.
+                    </p>
+                  </div>
+                </div>
+
                 <button
                   type="button"
                   onClick={() => savePolicyMutation.mutate()}
                   disabled={!formState.name.trim() || savePolicyMutation.isPending}
-                  className="px-6 py-3 rounded-xl bg-primary text-on-primary text-[10px] font-black uppercase tracking-widest disabled:opacity-40"
+                  className="w-full py-5 bg-primary text-on-primary rounded-3xl text-[12px] font-black uppercase tracking-[0.35em] disabled:opacity-40"
                 >
-                  {savePolicyMutation.isPending ? 'Saving...' : selectedPolicyId ? 'Update Policy' : 'Create Policy'}
+                  {savePolicyMutation.isPending ? 'Deploying Transmission...' : 'Deploy Protocol Changes'}
                 </button>
               </div>
             </div>
           </motion.div>
         )}
       </AnimatePresence>
-      <ConfirmDialog
-        open={deleteTargetId !== null}
-        title="Delete Policy?"
-        description="This policy will be removed and no longer applied in cascade resolution."
-        confirmLabel={deletePolicyMutation.isPending ? 'Deleting...' : 'Delete Policy'}
-        destructive
-        onConfirm={() => deleteTargetId && deletePolicyMutation.mutate(deleteTargetId)}
-        onCancel={() => setDeleteTargetId(null)}
-      />
     </div>
   );
 }

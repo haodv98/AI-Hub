@@ -1,11 +1,12 @@
 import { Grid2X2, Search } from 'lucide-react';
 import { NavLink, useLocation } from 'react-router';
 import { useAuth } from '@/contexts/AuthContext';
-import keycloak from '@/lib/auth';
+import { useGlobalUi } from '@/contexts/GlobalUiContext';
 
 export const TopBar = () => {
   const { userName } = useAuth();
   const location = useLocation();
+  const { openCommandPalette, openLogoutModal } = useGlobalUi();
 
   const isActive = (path: string) => location.pathname.startsWith(path);
 
@@ -16,14 +17,15 @@ export const TopBar = () => {
           <Grid2X2 className="w-5 h-5" />
         </button>
         
-        <div className="hidden lg:flex items-center bg-white/5 px-4 py-2 rounded-xl border border-white/5 focus-within:border-primary/30 focus-within:bg-white/10 transition-all">
+        <button
+          type="button"
+          onClick={openCommandPalette}
+          className="hidden lg:flex items-center bg-white/5 px-4 py-2 rounded-xl border border-white/5 focus-within:border-primary/30 focus-within:bg-white/10 transition-all w-[320px] text-left"
+        >
           <Search className="text-on-surface-variant w-4 h-4 mr-3" />
-          <input 
-            type="text" 
-            placeholder="Search systems..." 
-            className="bg-transparent border-none focus:ring-0 text-sm font-medium w-64 placeholder:text-on-surface-variant text-on-surface"
-          />
-        </div>
+          <span className="text-sm font-medium text-on-surface-variant flex-1">Search systems...</span>
+          <span className="text-[9px] text-primary font-black tracking-widest">CMD+K</span>
+        </button>
 
         <nav className="hidden xl:flex space-x-6 text-[11px] font-bold uppercase tracking-widest">
           <NavLink 
@@ -49,7 +51,7 @@ export const TopBar = () => {
 
       <div className="flex items-center space-x-4">
         <button 
-          onClick={() => keycloak.logout()}
+          onClick={openLogoutModal}
           className="text-[10px] font-bold uppercase tracking-wider text-on-surface-variant hover:text-on-surface transition-colors"
         >
           SIGNOUT
