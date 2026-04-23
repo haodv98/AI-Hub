@@ -1,0 +1,40 @@
+name: Deploy Staging
+
+on:
+  push:
+    branches: [develop]
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    env:
+      IMAGE_TAG: ${{ github.sha }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: Build API image
+        run: docker build -t "${{ secrets.CONTAINER_REGISTRY }}/aihub-api:${IMAGE_TAG}" ./api
+      - name: Build Web image
+        run: docker build -t "${{ secrets.CONTAINER_REGISTRY }}/aihub-web:${IMAGE_TAG}" ./web
+      - name: Push images
+        run: |
+          echo "${{ secrets.CONTAINER_REGISTRY_PASSWORD }}" | docker login "${{ secrets.CONTAINER_REGISTRY }}" -u "${{ secrets.CONTAINER_REGISTRY_USER }}" --password-stdin
+          docker push "${{ secrets.CONTAINER_REGISTRY }}/aihub-api:${IMAGE_TAG}"
+          docker push "${{ secrets.CONTAINER_REGISTRY }}/aihub-web:${IMAGE_TAG}"
+      - name: Configure kubeconfig
+        run: |
+          mkdir -p "${HOME}/.kube"
+          echo "${{ secrets.STAGING_KUBECONFIG }}" > "${HOME}/.kube/config"
+          chmod 600 "${HOME}/.kube/config"
+      - name: Apply staging manifests
+        run: kubectl apply -f infra/k8s/
+      - name: Roll forward API and Web images
+        run: |
+          kubectl set image deployment/aihub-api api="${{ secrets.CONTAINER_REGISTRY }}/aihub-api:${IMAGE_TAG}" -n aihub-staging
+          kubectl set image deployment/aihub-web web="${{ secrets.CONTAINER_REGISTRY }}/aihub-web:${IMAGE_TAG}" -n aihub-staging
+          kubectl rollout status deployment/aihub-api -n aihub-staging --timeout=180s
+          kubectl rollout status deployment/aihub-web -n aihub-staging --timeout=180s
+      - name: Smoke tests
+        run: curl -fsS "${{ secrets.STAGING_HEALTHCHECK_URL }}"

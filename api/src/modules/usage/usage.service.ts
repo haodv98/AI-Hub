@@ -14,6 +14,8 @@ import {
   TeamSummaryRow,
   TeamUsageRow,
   TopUserRow,
+  UsageExportSummary,
+  UsageHeatmapRow,
   UsageByModelRow,
   UsageEvent,
   UsageSummaryRow,
@@ -482,6 +484,73 @@ export class UsageService implements OnApplicationShutdown {
           calcGrowth(Number(row?.total_requests ?? 0), Number(previous?.total_requests ?? 0)).toFixed(2),
         ),
       },
+    };
+  }
+
+  async getUsageHeatmap(from: Date, to: Date): Promise<UsageHeatmapRow[]> {
+    return this.prisma.$queryRaw<UsageHeatmapRow[]>`
+      SELECT
+        EXTRACT(DOW FROM created_at)::int  AS "dayOfWeek",
+        EXTRACT(HOUR FROM created_at)::int AS "hourOfDay",
+        COUNT(*)::int                      AS "requestCount"
+      FROM usage_events
+      WHERE created_at >= ${from}
+        AND created_at <= ${to}
+      GROUP BY "dayOfWeek", "hourOfDay"
+      ORDER BY "dayOfWeek", "hourOfDay"
+    `;
+  }
+
+  async getExportSummary(from: Date, to: Date): Promise<UsageExportSummary> {
+    const [totals, byTeam, byProvider] = await Promise.all([
+      this.prisma.$queryRaw<Array<{ total_cost_usd: number | null; total_requests: number | null }>>`
+        SELECT
+          SUM(cost_usd)::float AS total_cost_usd,
+          COUNT(*)::int        AS total_requests
+        FROM usage_events
+        WHERE created_at >= ${from}
+          AND created_at <= ${to}
+      `,
+      this.prisma.$queryRaw<Array<{ team_name: string | null; cost_usd: number; request_count: number }>>`
+        SELECT
+          t.name                  AS team_name,
+          SUM(ue.cost_usd)::float AS cost_usd,
+          COUNT(*)::int           AS request_count
+        FROM usage_events ue
+        LEFT JOIN teams t ON t.id = ue.team_id::text
+        WHERE ue.created_at >= ${from}
+          AND ue.created_at <= ${to}
+        GROUP BY t.name
+        ORDER BY cost_usd DESC
+      `,
+      this.prisma.$queryRaw<Array<{ provider: string; cost_usd: number; request_count: number }>>`
+        SELECT
+          provider,
+          SUM(cost_usd)::float AS cost_usd,
+          COUNT(*)::int        AS request_count
+        FROM usage_events
+        WHERE created_at >= ${from}
+          AND created_at <= ${to}
+        GROUP BY provider
+        ORDER BY cost_usd DESC
+      `,
+    ]);
+
+    return {
+      from: from.toISOString(),
+      to: to.toISOString(),
+      totalCostUsd: Number(totals[0]?.total_cost_usd ?? 0),
+      totalRequests: Number(totals[0]?.total_requests ?? 0),
+      byTeam: byTeam.map((row) => ({
+        teamName: row.team_name ?? 'Unassigned',
+        costUsd: Number(row.cost_usd),
+        requestCount: Number(row.request_count),
+      })),
+      byProvider: byProvider.map((row) => ({
+        provider: row.provider,
+        costUsd: Number(row.cost_usd),
+        requestCount: Number(row.request_count),
+      })),
     };
   }
 

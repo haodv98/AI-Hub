@@ -1,0 +1,22 @@
+version: "3.9"
+
+services:
+  api:
+    env_file:
+      - ../api/.env.staging
+    environment:
+      NODE_ENV: staging
+    restart: unless-stopped
+
+  web:
+    environment:
+      NODE_ENV: staging
+    restart: unless-stopped
+
+  postgres:
+    environment:
+      POSTGRES_DB: aihub_staging
+    restart: unless-stopped
+
+  redis:
+    restart: unless-stopped

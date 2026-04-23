@@ -9,6 +9,7 @@ import { RateLimitService } from '../budget/rate-limit.service';
 import { PricingService } from '../budget/pricing.service';
 import { PoliciesService } from '../policies/policies.service';
 import { UsageService } from '../usage/usage.service';
+import { MetricsService } from '../metrics/metrics.service';
 import axios from 'axios';
 
 jest.mock('axios');
@@ -68,6 +69,12 @@ const mockUsage = () => ({
   recordEvent: jest.fn(),
 });
 
+const mockMetrics = () => ({
+  recordGatewayRequest: jest.fn(),
+  observeGatewayLatency: jest.fn(),
+  recordRateLimitRejection: jest.fn(),
+});
+
 const testUser: UserContext = {
   id: 'u1',
   email: 'dev@company.com',
@@ -107,6 +114,7 @@ describe('GatewayService', () => {
         { provide: ConfigService, useFactory: mockConfig },
         { provide: PoliciesService, useFactory: mockPolicies },
         { provide: UsageService, useFactory: mockUsage },
+        { provide: MetricsService, useFactory: mockMetrics },
       ],
     }).compile();
 

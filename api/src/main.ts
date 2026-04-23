@@ -14,9 +14,15 @@ async function bootstrap() {
   app.useLogger(app.get(Logger));
 
   // Security headers
-  app.use(helmet({
-    contentSecurityPolicy: false, // configured per-route if needed
-  }));
+  app.use(
+    helmet({
+      contentSecurityPolicy: false, // configured at edge for now
+      frameguard: { action: 'deny' },
+      referrerPolicy: { policy: 'no-referrer' },
+      hsts: { maxAge: 31536000, includeSubDomains: true, preload: true },
+      noSniff: true,
+    }),
+  );
 
   // CORS — restrict to admin portal origin in production
   const config = app.get(ConfigService);
@@ -24,6 +30,8 @@ async function bootstrap() {
   app.enableCors({
     origin: isDev ? true : [config.get('PORTAL_ORIGIN', 'https://aihub.internal')],
     credentials: true,
+    methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Authorization', 'Content-Type', 'X-Requested-With'],
   });
 
   // Global validation pipe — strip unknown fields
@@ -40,26 +48,28 @@ async function bootstrap() {
   // API prefix
   app.setGlobalPrefix('api');
 
-  // Swagger — available at /api/docs
-  const swaggerCfg = new DocumentBuilder()
-    .setTitle('AIHub API')
-    .setDescription(
-      'Centralized AI Engine resource manager. ' +
-      'Use **jwt** for Admin Portal (Keycloak Bearer token) or **api-key** for headless tools (Cursor, CLI).',
-    )
-    .setVersion('1.0')
-    .addBearerAuth({ type: 'http', scheme: 'bearer', bearerFormat: 'JWT' }, 'jwt')
-    .addBearerAuth({ type: 'http', scheme: 'bearer', bearerFormat: 'API Key' }, 'api-key')
-    .addTag('gateway', 'OpenAI-compatible chat completions proxy')
-    .addTag('users', 'User management')
-    .addTag('teams', 'Team management')
-    .addTag('keys', 'API key lifecycle')
-    .addTag('policies', 'Rate-limit / budget policies')
-    .addTag('usage', 'Usage and spend reporting')
-    .build();
-  SwaggerModule.setup('api/docs', app, SwaggerModule.createDocument(app, swaggerCfg), {
-    swaggerOptions: { persistAuthorization: true },
-  });
+  // Swagger — expose only outside production
+  if (isDev) {
+    const swaggerCfg = new DocumentBuilder()
+      .setTitle('AIHub API')
+      .setDescription(
+        'Centralized AI Engine resource manager. ' +
+        'Use **jwt** for Admin Portal (Keycloak Bearer token) or **api-key** for headless tools (Cursor, CLI).',
+      )
+      .setVersion('1.0')
+      .addBearerAuth({ type: 'http', scheme: 'bearer', bearerFormat: 'JWT' }, 'jwt')
+      .addBearerAuth({ type: 'http', scheme: 'bearer', bearerFormat: 'API Key' }, 'api-key')
+      .addTag('gateway', 'OpenAI-compatible chat completions proxy')
+      .addTag('users', 'User management')
+      .addTag('teams', 'Team management')
+      .addTag('keys', 'API key lifecycle')
+      .addTag('policies', 'Rate-limit / budget policies')
+      .addTag('usage', 'Usage and spend reporting')
+      .build();
+    SwaggerModule.setup('api/docs', app, SwaggerModule.createDocument(app, swaggerCfg), {
+      swaggerOptions: { persistAuthorization: true },
+    });
+  }
 
   const port = config.get<number>('PORT', 3001);
   await app.listen(port);

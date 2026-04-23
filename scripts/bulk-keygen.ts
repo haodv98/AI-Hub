@@ -1,7 +1,5 @@
 #!/usr/bin/env npx ts-node
 import axios from 'axios';
-import { writeFileSync } from 'fs';
-import { join } from 'path';
 
 const BASE_URL = process.env.API_BASE_URL ?? 'http://localhost:3001/api/v1';
 const ADMIN_TOKEN = process.env.ADMIN_TOKEN;
@@ -55,31 +53,40 @@ async function loadActiveKeyUsers(): Promise<Set<string>> {
   return activeUsers;
 }
 
-async function generateKey(userId: string): Promise<string> {
+async function generateKey(userId: string): Promise<{ id: string; keyPrefix: string; createdAt: string }> {
   const res = await api.post('/keys', null, { params: { userId } });
-  return res.data.data.key as string;
+  return {
+    id: res.data.data.id as string,
+    keyPrefix: res.data.data.keyPrefix as string,
+    createdAt: res.data.data.createdAt as string,
+  };
 }
 
 async function main() {
   const users = (await loadAllUsers()).filter((u) => u.status === 'ACTIVE');
   const activeKeyUsers = await loadActiveKeyUsers();
-  const output: Array<{ email: string; apiKey: string }> = [];
+  const output: Array<{ email: string; keyId: string; keyPrefix: string; createdAt: string }> = [];
+  const errors: Array<{ email: string; reason: string }> = [];
 
   for (const user of users) {
     if (activeKeyUsers.has(user.id)) continue;
 
-    const key = await generateKey(user.id);
-    output.push({ email: user.email, apiKey: key });
-    console.log(`Generated key for ${user.email}`);
+    try {
+      const key = await generateKey(user.id);
+      output.push({ email: user.email, keyId: key.id, keyPrefix: key.keyPrefix, createdAt: key.createdAt });
+      console.log(`Generated key metadata for ${user.email} (${key.keyPrefix})`);
+    } catch (err: any) {
+      errors.push({ email: user.email, reason: err?.response?.data?.message ?? err?.message ?? 'unknown_error' });
+    }
   }
 
-  const date = new Date().toISOString().slice(0, 10);
-  const outFile = join(process.cwd(), `bulk-keys-${date}.csv`);
-  const csv = ['user_email,key_plaintext', ...output.map((r) => `${r.email},${r.apiKey}`)].join('\n');
-  writeFileSync(outFile, csv, { encoding: 'utf-8', mode: 0o600 });
-
-  console.log(`Done. Generated ${output.length} keys -> ${outFile}`);
-  console.log('WARNING: distribute securely and delete this file after delivery.');
+  console.log(JSON.stringify({
+    success: output.length,
+    failed: errors.length,
+    generated: output,
+    errors,
+  }, null, 2));
+  console.warn('Security note: output contains key metadata; avoid storing logs in insecure channels.');
 }
 
 main().catch((err: any) => {

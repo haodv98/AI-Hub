@@ -8,19 +8,25 @@ deployment:
     config_provider: etcd
   etcd:
     host:
-      - http://etcd:2379
+      - https://etcd:2379
     prefix: /apisix
     timeout: 30
+    tls:
+      cert: /usr/local/apisix/conf/ssl/etcd-client.crt
+      key: /usr/local/apisix/conf/ssl/etcd-client.key
+      verify: true
   admin:
     admin_key_required: true
     allow_admin:
-      - 0.0.0.0/0
+      - 10.0.0.0/8
+      - 172.16.0.0/12
+      - 192.168.0.0/16
     admin_listen:
       ip: 0.0.0.0
       port: 9180
     admin_key:
       - name: admin
-        key: aihub-apisix-admin-key-dev
+        key: $ENV{APISIX_ADMIN_KEY}
         role: admin
 
 plugin_attr:
@@ -39,3 +45,6 @@ plugins:
   - ip-restriction
   - response-rewrite
   - proxy-rewrite
+
+# Route-level IP allowlist source of truth:
+# infra/apisix/conf/ip_whitelist.yaml

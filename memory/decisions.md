@@ -4,6 +4,14 @@ Log các quyết định kỹ thuật quan trọng của project AIHub.
 
 ---
 
+### [2026-04-23] Phase 3 LDAP Scope Exception for 3F→3K Completion
+
+**Context:** Kế hoạch `phase3-3f-3k-completion` yêu cầu hoàn tất rollout stop-loss gates nhưng loại trừ `TASK-350` (Keycloak LDAP/AD sync) khỏi phạm vi triển khai hiện tại.
+**Decision:** Chốt Phase 3 execution với LDAP deferred; dùng local Keycloak break-glass admin + RBAC hardening + audit/security evidence làm control tạm thời cho sign-off.
+**Consequences:** Exit criteria liên quan LDAP được đánh dấu exception tạm thời trong `tasks/phase3-rollout.md`; cần follow-up ticket riêng để triển khai LDAP sync ở phase kế tiếp.
+
+---
+
 ### [2026-04-18] Prisma v6 Upgrade
 
 **Context:** Phase 2 implementation. User yêu cầu upgrade từ Prisma v5.

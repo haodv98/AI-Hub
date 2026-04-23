@@ -15,6 +15,7 @@ import { RateLimitService } from '../budget/rate-limit.service';
 import { PricingService } from '../budget/pricing.service';
 import { PoliciesService } from '../policies/policies.service';
 import { UsageService } from '../usage/usage.service';
+import { MetricsService } from '../metrics/metrics.service';
 
 export interface UserContext {
   id: string;
@@ -55,11 +56,13 @@ export class GatewayService {
     private readonly config: ConfigService,
     private readonly policies: PoliciesService,
     private readonly usage: UsageService,
+    private readonly metrics: MetricsService,
   ) {}
 
   async handleRequest(user: UserContext, body: Record<string, unknown>): Promise<GatewayResult> {
     const requestStart = Date.now();
     const requestedModel = body.model as string;
+    const requestedProvider = this.getProvider(requestedModel);
 
     // ── Step 1: Auth validated by ApiKeyGuard ─────────────────────────────
 
@@ -75,6 +78,8 @@ export class GatewayService {
     const rpm = policy.config.limits.rpm;
     const rateLimitResult = await this.rateLimit.checkRateLimit(user.id, rpm);
     if (!rateLimitResult.allowed) {
+      this.metrics.recordRateLimitRejection(user.tier);
+      this.metrics.recordGatewayRequest(requestedProvider, requestedModel, 'error');
       throw new HttpException('Rate limit exceeded', HttpStatus.TOO_MANY_REQUESTS);
     }
 
@@ -135,6 +140,8 @@ export class GatewayService {
       const axiosErr = err as { response?: { status?: number; data?: { error?: { message?: string } } } };
       const status = axiosErr.response?.status ?? 502;
       const message = axiosErr.response?.data?.error?.message ?? 'Provider error';
+      this.metrics.recordGatewayRequest(provider, actualModel, 'error');
+      this.metrics.observeGatewayLatency(provider, Date.now() - requestStart);
       throw new HttpException({ success: false, error: { code: 'PROVIDER_ERROR', message } }, status);
     }
 
@@ -160,6 +167,8 @@ export class GatewayService {
         latencyMs: Date.now() - requestStart,
       });
     }
+    this.metrics.recordGatewayRequest(provider, actualModel, 'success');
+    this.metrics.observeGatewayLatency(provider, Date.now() - requestStart);
 
     // ── Step 9: Return with enriched headers ──────────────────────────────
     return {

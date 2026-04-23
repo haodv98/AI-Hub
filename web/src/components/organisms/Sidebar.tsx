@@ -10,7 +10,7 @@ const navItems = [
   { id: 'policies', to: '/policies', icon: Gavel, label: 'Policies', adminOnly: true },
   { id: 'usage', to: '/usage', icon: BarChart3, label: 'Usage', adminOnly: false },
   { id: 'audit', to: '/audit', icon: History, label: 'Audit Logs', adminOnly: true },
-  { id: 'reports', to: '/reports', icon: FileBox, label: 'Reports', adminOnly: false },
+  { id: 'reports', to: '/reports', icon: FileBox, label: 'Reports', adminOnly: true },
 ];
 
 export const Sidebar = () => {

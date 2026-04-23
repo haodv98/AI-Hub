@@ -1,4 +1,5 @@
 import { HrService } from './hr.service';
+import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../../../prisma/prisma.service';
 import { RedisService } from '../../../redis/redis.service';
 import { KeysService } from '../../keys/keys.service';
@@ -29,6 +30,9 @@ const mockPrisma = () => {
       fn({
         user,
         teamMember,
+        providerKey: {
+          updateMany: jest.fn(),
+        },
       }),
     ),
   };
@@ -55,6 +59,10 @@ const mockAudit = () => ({
   log: jest.fn(),
 });
 
+const mockConfig = () => ({
+  get: jest.fn(() => undefined),
+});
+
 describe('HrService', () => {
   let service: HrService;
   let prisma: ReturnType<typeof mockPrisma>;
@@ -68,6 +76,7 @@ describe('HrService', () => {
     keys = mockKeys();
     email = mockEmail();
     service = new HrService(
+      mockConfig() as unknown as ConfigService,
       prisma as unknown as PrismaService,
       redis as unknown as RedisService,
       keys as unknown as KeysService,
@@ -131,6 +140,8 @@ describe('HrService', () => {
         data: expect.objectContaining({ status: 'ACTIVE', offboardedAt: null }),
       }),
     );
+    expect(keys.generateKey).toHaveBeenCalledWith('u1', 'system');
+    expect(email.sendOnboardingKeyDelivery).toHaveBeenCalled();
   });
 
   it('offboards existing user by email', async () => {

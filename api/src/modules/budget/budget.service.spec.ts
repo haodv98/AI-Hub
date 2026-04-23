@@ -2,6 +2,7 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { BudgetService, PolicyLimits } from './budget.service';
 import { RedisService } from '../../redis/redis.service';
 import { PricingService } from './pricing.service';
+import { MetricsService } from '../metrics/metrics.service';
 
 const mockRedis = () => ({
   get: jest.fn().mockResolvedValue(null),
@@ -11,6 +12,10 @@ const mockRedis = () => ({
 
 const mockPricing = () => ({
   estimateCost: jest.fn().mockReturnValue(0.01),
+});
+
+const mockMetrics = () => ({
+  setTeamBudgetUsage: jest.fn(),
 });
 
 const unlimitedPolicy: PolicyLimits = { monthlyBudgetUsd: 0 };
@@ -30,6 +35,7 @@ describe('BudgetService', () => {
         BudgetService,
         { provide: RedisService, useFactory: mockRedis },
         { provide: PricingService, useFactory: mockPricing },
+        { provide: MetricsService, useFactory: mockMetrics },
       ],
     }).compile();
 

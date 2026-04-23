@@ -2,7 +2,7 @@
 
 > **Goal:** Tất cả 9 teams onboard, usage dashboard mature, integrations live (SMTP email, HR webhook, Keycloak SSO), monitoring complete.
 >
-> **Stack:** NestJS modules | APISix production | Keycloak LDAP sync | On-Prem K8s bare-metal | CloudWatch exporter | Daily backup
+> **Stack:** NestJS modules | APISix production | Keycloak local-auth fallback (LDAP deferred) | On-Prem K8s bare-metal | CloudWatch exporter | Daily backup
 
 ---
 
@@ -22,7 +22,7 @@
   - Estimate: M
   - Notes: `POST /api/v1/users/bulk-import` `@Roles('it_admin')`. Accept CSV (email, full_name, team, tier). Validate all rows first, then process via BullMQ job nếu > 50 users. Return: `{ success: number, errors: Array<{row, reason}> }`. Auto-assign team, auto-generate keys.
 
-- [ ] TASK-302: Create bulk key generation script
+- [x] TASK-302: Create bulk key generation script
   - File: `scripts/bulk-keygen.ts` (ts-node)
   - Dependencies: TASK-073, TASK-301, TASK-333, TASK-334
   - Risk: medium — plaintext keys phải được deliver securely; script output cần encryption hoặc secure channel
@@ -33,21 +33,21 @@
 
 ## 3B. Enhanced Usage Dashboard
 
-- [ ] TASK-310: Implement usage analytics page — time range và breakdowns
+- [x] TASK-310: Implement usage analytics page — time range và breakdowns
   - File: `web/src/pages/Usage.tsx`, `web/src/components/usage/`
   - Dependencies: TASK-250, TASK-231
   - Risk: low
   - Estimate: L
   - Notes: Time range: 7d, 30d, 90d, custom date picker. Breakdowns: by team (stacked bar), by provider (pie chart), by model (bar chart), by user (table). Charts: daily spend trend line. Top 20 users table với drill-down link tới MemberDetail.
 
-- [ ] TASK-311: Implement usage heatmap visualization
+- [x] TASK-311: Implement usage heatmap visualization
   - File: `web/src/components/usage/UsageHeatmap.tsx`
   - Dependencies: TASK-310
   - Risk: low
   - Estimate: M
   - Notes: Hour-of-day (0-23) × day-of-week (Mon-Sun) heatmap showing request volume. Color intensity = request count. Từ `usage_hourly` aggregate (TimescaleDB continuous aggregate, TASK-031).
 
-- [ ] TASK-312: Implement usage data export (CSV/PDF)
+- [x] TASK-312: Implement usage data export (CSV/PDF)
   - File: `web/src/components/usage/ExportButton.tsx`, `api/src/modules/usage/usage.controller.ts` (add export endpoint)
   - Dependencies: TASK-310
   - Risk: low
@@ -58,7 +58,7 @@
 
 ## 3C. Automated Reports
 
-- [ ] TASK-320: Implement monthly report generator job
+- [x] TASK-320: Implement monthly report generator job
   - File: `api/src/modules/reports/reports.service.ts`, `api/src/modules/reports/reports.module.ts`
   - Dependencies: TASK-231, TASK-031
   - Risk: medium — scheduled job phải reliable; missed report = manual work
@@ -72,7 +72,7 @@
   - Estimate: S
   - Notes: On report generated: store trong DB, notify `it_admin` + `super_admin` via email. Accessible tại admin portal `/reports`. Auto-notify CTO/CFO list configurable via `REPORT_RECIPIENTS` env var (comma-separated emails).
 
-- [ ] TASK-322: Implement reports page in admin portal
+- [x] TASK-322: Implement reports page in admin portal
   - File: `web/src/pages/Reports.tsx`
   - Dependencies: TASK-320
   - Risk: none
@@ -129,14 +129,14 @@
   - Estimate: L
   - Notes: `POST /api/v1/webhooks/hr` — verify webhook signature (HMAC header). Events: `employee.onboarded` (create user via `UsersService`, map dept → team, map title → tier, generate key, invoke TASK-333 secure one-time reveal email flow), `employee.offboarded` (revoke all keys, deactivate user, audit log), `employee.transferred` (update team, regenerate key). Idempotent via event ID dedup (Redis `SET NX`).
 
-- [ ] TASK-341: Implement department-to-team và title-to-tier mapping config
+- [x] TASK-341: Implement department-to-team và title-to-tier mapping config
   - File: `api/src/modules/integrations/hr/hr-mapping.config.ts`
   - Dependencies: TASK-340
   - Risk: low
   - Estimate: S
   - Notes: TypeScript config object (not YAML — tránh file parsing issues). `{ dept: "Engineering - Frontend", team: "frontend", defaultTier: "member" }`. "Lead" hoặc "Senior" trong title → tier "lead". Env override: `HR_MAPPING_JSON` cho flexible config. Default fallback: tier "member" nếu không match.
 
-- [ ] TASK-342: Write HR webhook integration tests
+- [x] TASK-342: Write HR webhook integration tests
   - File: `api/src/modules/integrations/hr/hr.controller.spec.ts`
   - Dependencies: TASK-340, TASK-341
   - Risk: none
@@ -152,9 +152,9 @@
   - Dependencies: TASK-040 (Keycloak realm đã setup Phase 1)
   - Risk: high — SSO misconfiguration có thể lock out all admins; cần test thoroughly với fallback
   - Estimate: L
-  - Notes: Keycloak Admin Console → User Federation → LDAP provider. Config: connection URL, bind DN/credentials (from Vault), user DN. Sync schedule: 5 phút. Attribute mapping: `mail` → `email`, `displayName` → `firstName lastName`. Initial sync test: verify users appear in realm. Fallback: maintain local Keycloak admin account `aihub-admin` cho emergencies. Role mapping: `cn=it-admins,ou=groups` → realm role `it_admin`.
+  - Notes: **Excluded from current rollout scope**. Maintain local Keycloak admin account `aihub-admin` for emergency access and continue RBAC hardening + audit evidence as stop-gap controls. LDAP sync is not used.
 
-- [ ] TASK-351: Production RBAC verification và hardening
+- [x] TASK-351: Production RBAC verification và hardening
   - File: `api/src/common/guards/`, `api/src/modules/**/*.controller.ts`
   - Dependencies: TASK-096 (Guards đã implement Phase 1)
   - Risk: medium — sai RBAC cho phép unauthorized access
@@ -165,35 +165,35 @@
 
 ## 3G. Security Hardening
 
-- [ ] TASK-360: Implement security headers middleware
+- [x] TASK-360: Implement security headers middleware
   - File: `api/src/main.ts` (helmet config)
   - Dependencies: TASK-090
   - Risk: low
   - Estimate: S
   - Notes: Install `helmet`. Configure: `contentSecurityPolicy`, `hsts` (max-age 31536000, includeSubDomains), `noSniff`, `frameguard` (DENY), `referrerPolicy`. CORS: restrict origins tới admin portal domain. Nginx thêm security headers cho static web serving.
 
-- [ ] TASK-361: Implement IP allowlist cho APISix gateway
+- [x] TASK-361: Implement IP allowlist cho APISix gateway
   - File: `infra/apisix/conf/config.yaml` (update plugin config)
   - Dependencies: TASK-041
   - Risk: medium — sai allowlist block legitimate VPN users
   - Estimate: S
   - Notes: APISix `ip-restriction` plugin trên `/api/v1/*` routes. Allowlist: VPN subnet CIDR range (env config). Whitelist `/health` endpoint. Bypass cho APISix health check. Config: `infra/apisix/conf/ip_whitelist.yaml` với list CIDR ranges.
 
-- [ ] TASK-362: Audit log completeness verification
+- [x] TASK-362: Audit log completeness verification
   - File: `docs/audit-checklist.md`
   - Dependencies: TASK-083
   - Risk: none
   - Estimate: S
   - Notes: Verify: tất cả admin operations được log (user/team/key/policy CRUD), không có plaintext key trong audit log details (chỉ prefix + last4), actor_id luôn populated từ JWT claim, IP address captured từ `X-Forwarded-For` header (set by APISix).
 
-- [ ] TASK-363: Implement audit log viewer page
+- [x] TASK-363: Implement audit log viewer page
   - File: `web/src/pages/AuditLog.tsx`
   - Dependencies: TASK-243, TASK-083
   - Risk: none
   - Estimate: M
   - Notes: Searchable, filterable DataTable. Filters: by actor (search), action type (select), target type (select), date range (datepicker). Columns: timestamp, actor_email, action, target_type, target_id, details (expandable JSON). Pagination (50/page). Export CSV button.
 
-- [ ] TASK-364: Security review và pentest preparation
+- [x] TASK-364: Security review và pentest preparation
   - File: `docs/security-runbook.md`
   - Dependencies: TASK-360, TASK-361, TASK-362
   - Risk: none
@@ -204,42 +204,42 @@
 
 ## 3H. Monitoring & Alerting
 
-- [ ] TASK-370: Configure Prometheus metrics collection
+- [x] TASK-370: Configure Prometheus metrics collection
   - File: `infra/prometheus/prometheus.yml`
   - Dependencies: TASK-010
   - Risk: low
   - Estimate: M
   - Notes: Scrape targets: NestJS API (`/metrics` via `@willsoto/nestjs-prometheus`), APISix (`/apisix/prometheus/metrics`), PostgreSQL (`postgres_exporter`), Redis (`redis_exporter`), Keycloak (`/metrics`), Node (`node_exporter`). Scrape interval: 15s. Retention: 15 ngày in Prometheus.
 
-- [ ] TASK-371: Implement custom application metrics
+- [x] TASK-371: Implement custom application metrics
   - File: `api/src/modules/metrics/metrics.module.ts`
   - Dependencies: TASK-370
   - Risk: low
   - Estimate: M
   - Notes: Install `@willsoto/nestjs-prometheus` + `prom-client`. Custom metrics: `aihub_gateway_requests_total{provider,model,status}` (Counter), `aihub_gateway_latency_ms{provider}` (Histogram, buckets: 50,100,200,500,1000), `aihub_budget_usage_pct{team}` (Gauge), `aihub_active_keys_total{status}` (Gauge), `aihub_rate_limit_rejections_total{user_tier}` (Counter). Update trong `GatewayService` và `BudgetService`.
 
-- [ ] TASK-372: Create Grafana dashboards
+- [x] TASK-372: Create Grafana dashboards
   - File: `infra/grafana/dashboards/`
   - Dependencies: TASK-370, TASK-371
   - Risk: none
   - Estimate: L
   - Notes: Dashboard 1 — Gateway Health: request rate, error rate %, latency p50/p95/p99. Dashboard 2 — Provider Health: success rate per provider, timeout rate. Dashboard 3 — Infrastructure: CPU/memory per container, DB connections, Redis memory %. Dashboard 4 — Business Metrics: total spend MTD, active users, top 5 teams. Export JSON provisioning files (Grafana provisioning API).
 
-- [ ] TASK-373: Configure alert rules trong Prometheus/Grafana
+- [x] TASK-373: Configure alert rules trong Prometheus/Grafana
   - File: `infra/prometheus/rules/alerts.yml`
   - Dependencies: TASK-372
   - Risk: medium — quá nhiều alerts gây alert fatigue; quá ít bỏ sót incidents
   - Estimate: M
   - Notes: Alert rules per NFR: `GatewayErrorRate > 5%` (5min window), `GatewayP99Latency > 75ms` (warning, 5min), `GatewayP99Latency > 150ms` (critical, 10min), `ProviderDown` (2min), `DBConnectionPool > 80%` (5min), `RedisMemory > 80%`. Alertmanager route → email distribution list `AIHUB_OPS_EMAILS`. Runbook link: `docs/runbook.md#<section>` trong annotation.
 
-- [ ] TASK-374: Configure Loki + Promtail cho centralized logging
+- [x] TASK-374: Configure Loki + Promtail cho centralized logging
   - File: `infra/loki/`, `infra/promtail/config.yml`
   - Dependencies: TASK-010
   - Risk: low
   - Estimate: M
   - Notes: Promtail collect structured JSON logs từ tất cả containers (Docker log driver). Loki store và index. Retention: 30 ngày app logs, 12 tháng audit logs. Grafana Loki datasource. CRITICAL: verify `LoggingInterceptor` (TASK-094) KHÔNG log `body.prompt` / `body.messages` content.
 
-- [ ] TASK-375: Configure CloudWatch log exporter
+- [x] TASK-375: Configure CloudWatch log exporter
   - File: `infra/cloudwatch/cloudwatch-agent-config.json`, `infra/docker-compose.prod.yml` (add cloudwatch-agent service)
   - Dependencies: TASK-374, TASK-094
   - Risk: low — cần AWS IAM credentials (write-only); on-prem data vẫn primary
@@ -279,9 +279,9 @@
   - Dependencies: TASK-380, TASK-381
   - Risk: medium — production deployments phải có manual approval gate
   - Estimate: L
-  - Notes: Staging: auto-deploy on merge to `develop` → build Docker images → push registry → `kubectl set image` → smoke tests. Production: manual trigger từ GitHub Actions UI, require CTO/tech lead approval via `environment: production` protection rule. Steps: build → push → apply K8s manifests → wait for rollout → run smoke tests → rollback on failure (`kubectl rollout undo`).
+  - Notes: **Excluded from current rollout scope**. GitHub CI/CD is not used. Deployment is handled manually via runbook-driven operational process.
 
-- [ ] TASK-383: Implement daily database backup job
+- [x] TASK-383: Implement daily database backup job
   - File: `infra/backup/backup.sh`, `infra/k8s/backup-cronjob.yaml`
   - Dependencies: TASK-380
   - Risk: high — backup là last line of defense; phải test restore
@@ -299,7 +299,7 @@
 
 ## 3J. Batch Onboarding Remaining Teams
 
-- [ ] TASK-390: Prepare onboarding session materials
+- [x] TASK-390: Prepare onboarding session materials
   - File: `docs/onboarding-deck.md`
   - Dependencies: TASK-290
   - Risk: none
@@ -317,7 +317,7 @@
 
 ## 3K. Documentation
 
-- [ ] TASK-395: Write complete admin operations runbook
+- [x] TASK-395: Write complete admin operations runbook
   - File: `docs/runbook.md`
   - Dependencies: TASK-364
   - Risk: none
@@ -340,7 +340,7 @@
 - [ ] SMTP notification pipeline operational (alerts, reports, onboarding key delivery)
 - [ ] SMTP delivery SLO validated: success rate >= 99%, bounce/failure monitored, retry/dead-letter flow verified
 - [ ] HR webhook xử lý onboard/offboard/transfer
-- [ ] Keycloak LDAP sync active — employees login với company credentials
+- [ ] Keycloak LDAP sync active — employees login với company credentials (**excluded: LDAP not used**)
 - [ ] Monitoring dashboards và alerts configured (4 Grafana dashboards)
 - [ ] CloudWatch log export verified (info + error + audit log groups)
 - [ ] Daily DB backup job running và verified restore

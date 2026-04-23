@@ -88,3 +88,18 @@ export interface OrgSummary {
     requestsPct: number;
   };
 }
+
+export interface UsageHeatmapRow {
+  dayOfWeek: number;
+  hourOfDay: number;
+  requestCount: number;
+}
+
+export interface UsageExportSummary {
+  from: string;
+  to: string;
+  totalCostUsd: number;
+  totalRequests: number;
+  byTeam: Array<{ teamName: string; costUsd: number; requestCount: number }>;
+  byProvider: Array<{ provider: string; costUsd: number; requestCount: number }>;
+}

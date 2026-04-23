@@ -20,20 +20,38 @@ groups:
           summary: "APISix gateway is unreachable"
           description: "Prometheus cannot scrape APISix metrics for > 1 minute."
 
-      - alert: HighAPILatencyP99
-        expr: histogram_quantile(0.99, rate(http_request_duration_seconds_bucket{job="nestjs-api"}[5m])) > 0.5
+      - alert: GatewayP99LatencyWarning
+        expr: histogram_quantile(0.99, rate(http_request_duration_seconds_bucket{job="nestjs-api"}[5m])) > 0.05
         for: 5m
         labels:
           severity: warning
         annotations:
-          summary: "API p99 latency > 500ms"
-          description: "p99 latency is {{ $value | humanizeDuration }} over the last 5 minutes."
+          summary: "Gateway p99 latency > 75ms"
+          description: "Gateway p99 latency breached warning threshold (50ms) for 5 minutes."
+          runbook_url: "https://aihub.internal/docs/runbook#gateway-latency-spike"
 
-      - alert: HighErrorRate
-        expr: rate(http_requests_total{job="nestjs-api", status=~"5.."}[5m]) / rate(http_requests_total{job="nestjs-api"}[5m]) > 0.05
+      - alert: GatewayP99LatencyCritical
+        expr: histogram_quantile(0.99, rate(http_request_duration_seconds_bucket{job="nestjs-api"}[10m])) > 0.1
+        for: 10m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Gateway p99 latency > 100ms"
+          description: "Gateway p99 latency breached critical threshold (100ms) for 10 minutes."
+          runbook_url: "https://aihub.internal/docs/runbook#gateway-latency-spike"
+
+      - alert: GatewayErrorRateHigh
+        expr: |
+          (
+            rate(http_requests_total{job="nestjs-api", status=~"5.."}[5m])
+            /
+            rate(http_requests_total{job="nestjs-api"}[5m])
+          ) > 0.05
+          and rate(http_requests_total{job="nestjs-api"}[5m]) > 0
         for: 5m
         labels:
-          severity: warning
+          severity: critical
         annotations:
-          summary: "Error rate > 5%"
-          description: "More than 5% of requests are returning 5xx errors."
+          summary: "Gateway error rate > 5%"
+          description: "More than 5% of requests are returning 5xx responses."
+          runbook_url: "https://aihub.internal/docs/runbook#high-5xx-error-rate"

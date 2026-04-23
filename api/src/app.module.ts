@@ -16,8 +16,11 @@ import { UsageModule } from './modules/usage/usage.module';
 import { GatewayModule } from './modules/gateway/gateway.module';
 import { ReportsModule } from './modules/reports/reports.module';
 import { HrModule } from './modules/integrations/hr/hr.module';
+import { HealthController } from './health.controller';
+import { MetricsModule } from './modules/metrics/metrics.module';
 
 @Module({
+  controllers: [HealthController],
   imports: [
     ConfigModule.forRoot({ isGlobal: true }),
     ScheduleModule.forRoot(),
@@ -55,6 +58,7 @@ import { HrModule } from './modules/integrations/hr/hr.module';
     PoliciesModule,
     AlertsModule,
     UsageModule,
+    MetricsModule,
     GatewayModule,
     ReportsModule,
     HrModule,

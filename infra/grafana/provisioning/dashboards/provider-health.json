@@ -1,0 +1,45 @@
+{
+  "id": null,
+  "uid": "aihub-provider-health",
+  "title": "AIHub Provider Health",
+  "tags": ["aihub", "provider"],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "30s",
+  "panels": [
+    {
+      "type": "timeseries",
+      "title": "Success Rate by Provider",
+      "gridPos": { "x": 0, "y": 0, "w": 24, "h": 8 },
+      "targets": [
+        {
+          "expr": "sum by (provider) (rate(aihub_gateway_requests_total{status=\"success\"}[5m])) / clamp_min(sum by (provider) (rate(aihub_gateway_requests_total[5m])), 1e-9)",
+          "legendFormat": "{{provider}}"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Error Requests by Provider",
+      "gridPos": { "x": 0, "y": 8, "w": 12, "h": 8 },
+      "targets": [
+        {
+          "expr": "sum by (provider) (rate(aihub_gateway_requests_total{status=\"error\"}[5m]))",
+          "legendFormat": "{{provider}}"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Latency p99 by Provider (ms)",
+      "gridPos": { "x": 12, "y": 8, "w": 12, "h": 8 },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.99, sum by (provider, le) (rate(aihub_gateway_latency_ms_bucket[5m])))",
+          "legendFormat": "{{provider}}"
+        }
+      ]
+    }
+  ]
+}

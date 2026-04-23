@@ -1,11 +1,12 @@
 import { Injectable, Logger } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { TeamMemberTier, UserRole, UserStatus } from '@prisma/client';
 import { PrismaService } from '../../../prisma/prisma.service';
 import { RedisService } from '../../../redis/redis.service';
 import { KeysService } from '../../keys/keys.service';
 import { EmailService } from '../email/email.service';
 import { AuditService } from '../../audit/audit.service';
-import { HR_DEFAULT_MAPPING, resolveTierFromTitle } from './hr-mapping.config';
+import { HrMappingRule, loadHrMappingFromEnv, resolveTierFromTitle } from './hr-mapping.config';
 import { HrWebhookEventDto } from './hr.dto';
 
 type HrWebhookEvent = HrWebhookEventDto;
@@ -13,14 +14,18 @@ type HrWebhookEvent = HrWebhookEventDto;
 @Injectable()
 export class HrService {
   private readonly logger = new Logger(HrService.name);
+  private readonly mappingRules: HrMappingRule[];
 
   constructor(
+    private readonly config: ConfigService,
     private readonly prisma: PrismaService,
     private readonly redis: RedisService,
     private readonly keys: KeysService,
     private readonly email: EmailService,
     private readonly audit: AuditService,
-  ) {}
+  ) {
+    this.mappingRules = loadHrMappingFromEnv(this.config.get<string>('HR_MAPPING_JSON'));
+  }
 
   async handleEvent(event: HrWebhookEvent): Promise<{ processed: boolean; deduped: boolean }> {
     const dedupeKey = `hr:event:${event.id}`;
@@ -91,15 +96,15 @@ export class HrService {
     });
 
     const existingKey = await this.keys.getMyKey(user.id);
-    if (!existingKey) {
-      const { key, plaintext } = await this.keys.generateKey(user.id, 'system');
-      await this.email.sendOnboardingKeyDelivery({
-        userId: user.id,
-        email,
-        keyId: key.id,
-        keyPlaintext: plaintext,
-      });
-    }
+    const issued = existingKey
+      ? await this.keys.rotateKey(existingKey.id, 'system')
+      : await this.keys.generateKey(user.id, 'system');
+    await this.email.sendOnboardingKeyDelivery({
+      userId: user.id,
+      email,
+      keyId: issued.key.id,
+      keyPlaintext: issued.plaintext,
+    });
 
     this.audit.log({
       actorId: 'system',
@@ -116,14 +121,16 @@ export class HrService {
     const user = await this.prisma.user.findUnique({ where: { email }, select: { id: true } });
     if (!user) return;
 
-    await this.keys.revokeAllUserKeys(user.id, 'system');
-    await this.prisma.providerKey.updateMany({
-      where: { userId: user.id, isActive: true },
-      data: { isActive: false },
-    });
-    await this.prisma.user.update({
-      where: { id: user.id },
-      data: { status: UserStatus.OFFBOARDED, offboardedAt: new Date() },
+    await this.prisma.$transaction(async (tx) => {
+      await this.keys.revokeAllUserKeys(user.id, 'system');
+      await tx.providerKey.updateMany({
+        where: { userId: user.id, isActive: true },
+        data: { isActive: false },
+      });
+      await tx.user.update({
+        where: { id: user.id },
+        data: { status: UserStatus.OFFBOARDED, offboardedAt: new Date() },
+      });
     });
 
     this.audit.log({
@@ -187,7 +194,7 @@ export class HrService {
     const normalized = (department ?? '').trim().toLowerCase();
     if (!normalized) return null;
 
-    const mapping = HR_DEFAULT_MAPPING.find((rule) => rule.dept === normalized);
+    const mapping = this.mappingRules.find((rule) => rule.dept === normalized);
     if (mapping) {
       const team = await this.prisma.team.findFirst({
         where: { name: { equals: mapping.team, mode: 'insensitive' } },

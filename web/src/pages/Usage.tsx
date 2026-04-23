@@ -8,7 +8,6 @@ import {
   Box,
   ChevronRight,
   Cpu,
-  Download,
   TrendingUp,
   Users,
 } from 'lucide-react';
@@ -27,6 +26,8 @@ import {
   YAxis,
 } from 'recharts';
 import { SegmentedFilterButton } from '@/components/atoms/SegmentedFilterButton';
+import { ExportButton } from '@/components/usage/ExportButton';
+import { UsageHeatmap } from '@/components/usage/UsageHeatmap';
 import { formatNumber, formatUsd } from '@/lib/utils';
 import api from '@/lib/api';
 
@@ -133,9 +134,7 @@ export default function Usage() {
               />
             ))}
           </div>
-          <button type="button" aria-label="Download usage report (coming soon)" disabled className="p-3 glass-panel rounded-xl opacity-50 cursor-not-allowed">
-            <Download className="w-5 h-5" />
-          </button>
+          <ExportButton from={dateRange.from} to={dateRange.to} />
         </div>
       </div>
 
@@ -307,6 +306,8 @@ export default function Usage() {
           </tbody>
         </table>
       </div>
+
+      <UsageHeatmap from={dateRange.from} to={dateRange.to} />
     </div>
   );
 }

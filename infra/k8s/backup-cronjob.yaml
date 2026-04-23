@@ -1,0 +1,44 @@
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: aihub-db-backup
+  namespace: aihub-prod
+spec:
+  schedule: "0 3 * * *"
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: 600
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          activeDeadlineSeconds: 3600
+          restartPolicy: OnFailure
+          containers:
+            - name: backup
+              image: postgres:16
+              command: ["/bin/bash", "/scripts/backup.sh"]
+              env:
+                - name: DATABASE_URL
+                  valueFrom:
+                    secretKeyRef:
+                      name: aihub-backup-secrets
+                      key: database_url
+                - name: BACKUP_ENCRYPTION_KEY
+                  valueFrom:
+                    secretKeyRef:
+                      name: aihub-backup-secrets
+                      key: backup_encryption_key
+                - name: BACKUP_DESTINATION
+                  valueFrom:
+                    secretKeyRef:
+                      name: aihub-backup-secrets
+                      key: backup_destination
+              volumeMounts:
+                - name: backup-script
+                  mountPath: /scripts
+          volumes:
+            - name: backup-script
+              configMap:
+                name: aihub-backup-script

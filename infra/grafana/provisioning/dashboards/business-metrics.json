@@ -1,0 +1,56 @@
+{
+  "id": null,
+  "uid": "aihub-business-metrics",
+  "title": "AIHub Business Metrics",
+  "tags": ["aihub", "business"],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "1m",
+  "panels": [
+    {
+      "type": "stat",
+      "title": "Total Requests (5m rate)",
+      "gridPos": { "x": 0, "y": 0, "w": 6, "h": 5 },
+      "targets": [
+        {
+          "expr": "sum(rate(aihub_gateway_requests_total[5m]))",
+          "legendFormat": "requests/s"
+        }
+      ]
+    },
+    {
+      "type": "stat",
+      "title": "Active Keys",
+      "gridPos": { "x": 6, "y": 0, "w": 6, "h": 5 },
+      "targets": [
+        {
+          "expr": "sum(aihub_active_keys_total{status=\"active\"})",
+          "legendFormat": "active keys"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Budget Usage by Team (%)",
+      "gridPos": { "x": 12, "y": 0, "w": 12, "h": 5 },
+      "targets": [
+        {
+          "expr": "aihub_budget_usage_pct",
+          "legendFormat": "{{team}}"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Rate Limit Rejections",
+      "gridPos": { "x": 0, "y": 5, "w": 24, "h": 8 },
+      "targets": [
+        {
+          "expr": "sum by (user_tier) (rate(aihub_rate_limit_rejections_total[5m]))",
+          "legendFormat": "{{user_tier}}"
+        }
+      ]
+    }
+  ]
+}

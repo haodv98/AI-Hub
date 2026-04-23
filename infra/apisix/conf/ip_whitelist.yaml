@@ -1,0 +1,11 @@
+allowlist:
+  vpn_cidrs:
+    - 10.0.0.0/8
+    - 172.16.0.0/12
+    - 192.168.0.0/16
+  public_exempt_paths:
+    - /health
+  notes:
+    - "Apply APISIX ip-restriction plugin to protected /api/v1/* routes."
+    - "Keep /health public for uptime probes."
+    - "Maintain break-glass VPN CIDR for operations access."

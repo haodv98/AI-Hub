@@ -1,6 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { RedisService } from '../../redis/redis.service';
 import { PricingService } from './pricing.service';
+import { MetricsService } from '../metrics/metrics.service';
 
 export interface PolicyLimits {
   monthlyBudgetUsd: number;
@@ -31,6 +32,7 @@ export class BudgetService {
   constructor(
     private readonly redis: RedisService,
     private readonly pricing: PricingService,
+    private readonly metrics: MetricsService,
   ) {}
 
   async checkAndEnforceBudget(
@@ -59,6 +61,9 @@ export class BudgetService {
 
     const cap = policy.monthlyBudgetUsd;
     const usagePct = cap > 0 ? (currentCost / cap) * 100 : 0;
+    if (teamId && cap > 0) {
+      this.metrics.setTeamBudgetUsage(teamId, usagePct);
+    }
 
     // Check fallback threshold (e.g. 90%)
     if (

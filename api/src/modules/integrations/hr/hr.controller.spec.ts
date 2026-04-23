@@ -44,6 +44,19 @@ describe('HrController', () => {
     expect(result.success).toBe(true);
   });
 
+  it('processes offboard events with valid signature', async () => {
+    const event = {
+      id: 'evt-2',
+      type: 'employee.offboarded',
+      payload: { email: 'a@company.com' },
+    } as const;
+    const rawBody = Buffer.from(JSON.stringify(event));
+    const signature = crypto.createHmac('sha256', 'top-secret').update(rawBody).digest('hex');
+
+    await controller.handleWebhook(event as any, signature, { rawBody } as any);
+    expect(hr.handleEvent).toHaveBeenCalledWith(event);
+  });
+
   it('rejects invalid signature', async () => {
     const event = {
       id: 'evt-1',
@@ -71,5 +84,33 @@ describe('HrController', () => {
     await expect(
       controller.handleWebhook(event as any, `sha256=${signature}`, { rawBody } as any),
     ).resolves.toBeDefined();
+  });
+
+  it('rejects missing signature', async () => {
+    const event = {
+      id: 'evt-3',
+      type: 'employee.transferred',
+      payload: { email: 'a@company.com' },
+    } as const;
+
+    await expect(
+      controller.handleWebhook(event as any, undefined, { rawBody: Buffer.from(JSON.stringify(event)) } as any),
+    ).rejects.toThrow(UnauthorizedException);
+  });
+
+  it('rejects missing raw body', async () => {
+    const event = {
+      id: 'evt-4',
+      type: 'employee.onboarded',
+      payload: { email: 'a@company.com' },
+    } as const;
+    const signature = crypto
+      .createHmac('sha256', 'top-secret')
+      .update(Buffer.from(JSON.stringify(event)))
+      .digest('hex');
+
+    await expect(
+      controller.handleWebhook(event as any, signature, { rawBody: undefined } as any),
+    ).rejects.toThrow(UnauthorizedException);
   });
 });
