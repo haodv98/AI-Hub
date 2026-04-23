@@ -2,9 +2,11 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { AlertsService } from './alerts.service';
 import { PrismaService } from '../../prisma/prisma.service';
 import { RedisService } from '../../redis/redis.service';
+import { EmailService } from '../integrations/email/email.service';
 
 const mockPrisma = () => ({
   alertLog: { create: jest.fn().mockResolvedValue({}) },
+  teamMember: { findMany: jest.fn().mockResolvedValue([]) },
   $queryRaw: jest.fn(),
 });
 
@@ -12,10 +14,16 @@ const mockRedis = () => ({
   setNx: jest.fn().mockResolvedValue(true),
 });
 
+const mockEmail = () => ({
+  sendToUser: jest.fn().mockResolvedValue(undefined),
+  sendToGroup: jest.fn().mockResolvedValue(undefined),
+});
+
 describe('AlertsService', () => {
   let service: AlertsService;
   let prisma: ReturnType<typeof mockPrisma>;
   let redis: ReturnType<typeof mockRedis>;
+  let email: ReturnType<typeof mockEmail>;
 
   beforeEach(async () => {
     const module: TestingModule = await Test.createTestingModule({
@@ -23,12 +31,14 @@ describe('AlertsService', () => {
         AlertsService,
         { provide: PrismaService, useFactory: mockPrisma },
         { provide: RedisService, useFactory: mockRedis },
+        { provide: EmailService, useFactory: mockEmail },
       ],
     }).compile();
 
     service = module.get(AlertsService);
     prisma = module.get(PrismaService) as any;
     redis = module.get(RedisService) as any;
+    email = module.get(EmailService) as any;
   });
 
   afterEach(() => jest.clearAllMocks());
@@ -62,6 +72,11 @@ describe('AlertsService', () => {
       );
       expect(prisma.alertLog.create).toHaveBeenCalledWith(
         expect.objectContaining({ data: expect.objectContaining({ alertType: 'BUDGET_70' }) }),
+      );
+      expect(email.sendToUser).toHaveBeenCalledWith(
+        'u1',
+        'budget_alert',
+        expect.objectContaining({ threshold: 70 }),
       );
     });
 
@@ -106,6 +121,11 @@ describe('AlertsService', () => {
       expect(prisma.alertLog.create).toHaveBeenCalledWith(
         expect.objectContaining({ data: expect.objectContaining({ alertType: 'TEAM_BUDGET_70', teamId: 't1' }) }),
       );
+      expect(email.sendToGroup).toHaveBeenCalledWith(
+        'ops',
+        'team_budget_alert',
+        expect.objectContaining({ teamId: 't1', threshold: 70 }),
+      );
     });
 
     it('fires all three team alerts at 100%', async () => {
@@ -148,6 +168,11 @@ describe('AlertsService', () => {
       expect(redis.setNx).toHaveBeenCalledWith(expect.stringContaining('spike'), '1', 86400);
       expect(prisma.alertLog.create).toHaveBeenCalledWith(
         expect.objectContaining({ data: expect.objectContaining({ alertType: 'SPIKE', teamId: 't1' }) }),
+      );
+      expect(email.sendToGroup).toHaveBeenCalledWith(
+        'ops',
+        'spike_detected',
+        expect.objectContaining({ teamId: 't1' }),
       );
     });
 

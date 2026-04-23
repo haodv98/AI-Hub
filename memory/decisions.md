@@ -217,11 +217,12 @@ Gateway resolution order khi forward request:
 - Dev, Senior, Lead → PER_SEAT (Claude Team + Codex)
 - HR, Translator, tác vụ không thường xuyên → SHARED (Gemini hoặc Local LLM)
 
-**ADRs cần update:** ADR-0005 (Vault structure), ADR-0001 (gateway routing note).
-**Code changes cần implement (deferred to Phase 3 unless confirmed earlier):**
-- `GatewayService.resolveProviderKey(userId, provider)` method
-- Admin Portal: UI assign/import per-seat keys (CSV bulk import)
-- Vault AppRole permissions mở rộng để đọc per-user paths
+**ADRs updated (2026-04-21):** ADR-0005 (Vault structure), ADR-0001 (gateway routing note).
+**Code changes implemented (2026-04-21):**
+- `GatewayService.resolveProviderKey(userId, provider)` with PER_SEAT-first fallback to SHARED
+- Admin Portal: manual assign per-seat key + CSV bulk import flow
+- Vault AppRole permissions mở rộng cho `kv/data/aihub/providers/*/users/*`
+- Internal API key lifecycle preserved: provider key never shared to employee; on assign/import, system auto-issues `aihub_*` key if user has none
 
 ---
 

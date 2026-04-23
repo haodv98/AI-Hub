@@ -325,13 +325,13 @@ describe('GatewayService', () => {
   // ── Provider key routing (per-seat vs shared) ─────────────────────────────
 
   describe('handleRequest — provider key routing', () => {
-    const perSeatRecord = { vaultPath: 'secret/aihub/providers/anthropic/users/u1' };
+    const perSeatRecord = { vaultPath: 'kv/aihub/providers/anthropic/users/u1' };
 
     it('reads per-seat key from Vault when user has one assigned', async () => {
       (prisma.providerKey.findFirst as jest.Mock).mockResolvedValue(perSeatRecord);
       await service.handleRequest(testUser, { model: 'claude-haiku-4' });
       expect(vault.readSecret).toHaveBeenCalledWith(
-        'secret/aihub/providers/anthropic/users/u1',
+        'kv/aihub/providers/anthropic/users/u1',
         'api_key',
       );
       expect(vault.getProviderKey).not.toHaveBeenCalled();

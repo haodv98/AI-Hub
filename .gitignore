@@ -53,3 +53,4 @@ graphify-out/
 .claude/briefing.log
 # Added by code-review-graph
 .code-review-graph/
+.ace-tool/

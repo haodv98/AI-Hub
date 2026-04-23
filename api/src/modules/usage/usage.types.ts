@@ -42,6 +42,32 @@ export interface TeamSummaryRow {
   requestCount: number;
 }
 
+export interface ProviderBreakdownRow {
+  provider: string;
+  value: number;
+}
+
+export interface ModelUsageRow {
+  model: string;
+  requestCount: number;
+}
+
+export interface TopUserRow {
+  userId: string;
+  name: string;
+  team: string;
+  spendUsd: number;
+  tokens: number;
+  growthPct: number;
+}
+
+export interface TeamUsageRow {
+  teamId: string;
+  spendUsd: number;
+  utilizationPct: number;
+  members: number;
+}
+
 export interface OrgSummary {
   totalCost: number;
   totalTokens: number;
@@ -49,4 +75,16 @@ export interface OrgSummary {
   teamCount: number;
   byDay: DailySummaryRow[];
   byTeam: TeamSummaryRow[];
+  providerBreakdown: ProviderBreakdownRow[];
+  modelUsage: ModelUsageRow[];
+  topUsers: TopUserRow[];
+  latency: {
+    avgMs: number;
+  };
+  teamUsage: TeamUsageRow[];
+  trends: {
+    spendPct: number;
+    tokensPct: number;
+    requestsPct: number;
+  };
 }

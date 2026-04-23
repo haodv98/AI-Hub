@@ -204,14 +204,14 @@
 
 ## 2I. Pilot Preparation
 
-- [ ] TASK-290: Write employee onboarding guide
+- [x] TASK-290: Write employee onboarding guide
   - File: `docs/employee-guide.md`
   - Dependencies: TASK-053
   - Risk: none
   - Estimate: S
   - Notes: Hướng dẫn config: Cursor IDE (`openai.baseUrl`, `openai.apiKey`), Claude Code CLI (`ANTHROPIC_BASE_URL`, `ANTHROPIC_API_KEY`), Python/JS scripts. FAQ: budget exceeded, key rotation, Slack commands.
 
-- [ ] TASK-291: Write admin operations guide
+- [x] TASK-291: Write admin operations guide
   - File: `docs/admin-guide.md`
   - Dependencies: TASK-270, TASK-281
   - Risk: none

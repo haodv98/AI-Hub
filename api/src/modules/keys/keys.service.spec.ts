@@ -5,18 +5,27 @@ import { RedisService } from '../../redis/redis.service';
 import { AuditService } from '../audit/audit.service';
 import { ApiKeyStatus } from '@prisma/client';
 import * as crypto from 'crypto';
+import { OneTimeTokenService } from '../integrations/email/one-time-token.service';
 
 // Minimal mock factory
-const mockPrisma = () => ({
-  apiKey: {
+const mockPrisma = () => {
+  const apiKey = {
     create: jest.fn(),
     findUnique: jest.fn(),
     findFirst: jest.fn(),
     findMany: jest.fn(),
     update: jest.fn(),
     count: jest.fn(),
-  },
-});
+  };
+
+  return {
+    apiKey,
+    user: {
+      findUnique: jest.fn().mockResolvedValue({ role: 'IT_ADMIN' }),
+    },
+    $transaction: jest.fn(async (cb) => cb({ apiKey })),
+  };
+};
 
 const mockRedis = () => ({
   get: jest.fn().mockResolvedValue(null),
@@ -29,10 +38,15 @@ const mockAudit = () => ({
   log: jest.fn().mockResolvedValue(undefined),
 });
 
+const mockOneTimeToken = () => ({
+  consume: jest.fn(),
+});
+
 describe('KeysService', () => {
   let service: KeysService;
   let prisma: ReturnType<typeof mockPrisma>;
   let redis: ReturnType<typeof mockRedis>;
+  let token: ReturnType<typeof mockOneTimeToken>;
 
   beforeEach(async () => {
     const module: TestingModule = await Test.createTestingModule({
@@ -41,12 +55,14 @@ describe('KeysService', () => {
         { provide: PrismaService, useFactory: mockPrisma },
         { provide: RedisService, useFactory: mockRedis },
         { provide: AuditService, useFactory: mockAudit },
+        { provide: OneTimeTokenService, useFactory: mockOneTimeToken },
       ],
     }).compile();
 
     service = module.get(KeysService);
     prisma = module.get(PrismaService) as any;
     redis = module.get(RedisService) as any;
+    token = module.get(OneTimeTokenService) as any;
   });
 
   // ── Key format ────────────────────────────────────────────────────────────
@@ -206,6 +222,37 @@ describe('KeysService', () => {
 
       const result = await service.validateKey('aihub_prod_somekey');
       expect(result).toMatchObject({ id: 'k1', status: ApiKeyStatus.ACTIVE });
+    });
+  });
+
+  describe('claimOnboardingKey', () => {
+    it('returns plaintext for valid token and key ownership', async () => {
+      (token.consume as jest.Mock).mockResolvedValue({
+        subject: 'u1',
+        purpose: 'key_reveal',
+        resourceId: 'k1',
+        expiresAt: new Date(Date.now() + 60_000).toISOString(),
+        keyPlaintext: 'aihub_prod_claimed',
+      });
+      (prisma.apiKey.findUnique as jest.Mock).mockResolvedValue({
+        id: 'k1',
+        userId: 'u1',
+        status: ApiKeyStatus.ACTIVE,
+      });
+
+      const result = await service.claimOnboardingKey('u1', 'token');
+      expect(result).toEqual({ plaintext: 'aihub_prod_claimed', keyId: 'k1' });
+    });
+
+    it('throws when token subject mismatches user', async () => {
+      (token.consume as jest.Mock).mockResolvedValue({
+        subject: 'u2',
+        purpose: 'key_reveal',
+        resourceId: 'k1',
+        expiresAt: new Date(Date.now() + 60_000).toISOString(),
+        keyPlaintext: 'aihub_prod_claimed',
+      });
+      await expect(service.claimOnboardingKey('u1', 'token')).rejects.toThrow('Token subject mismatch');
     });
   });
 });

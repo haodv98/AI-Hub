@@ -93,12 +93,16 @@ Vào **Settings → Provider Keys → Import Per-Seat Keys**:
 2. Hệ thống tự map email → user account → lưu key vào Vault tại path `providers/{provider}/users/{user_id}`
 3. Review kết quả — user nào đã được gán hiện badge **Seat Assigned**
 
+> Sau khi import: nếu user chưa có **internal AIHub API key**, hệ thống sẽ auto-generate key nội bộ và trả về cho IT Admin ở màn hình kết quả (chỉ hiển thị một lần).
+
 #### Gán thủ công cho từng user
 
 Vào **Users → [tên user] → Provider Keys → Assign Seat Key**:
 1. Chọn provider
 2. Dán API key của seat đó
 3. Click **Save**
+
+> Provider key chỉ dùng nội bộ (Vault + Gateway), **không gửi cho user**. User chỉ nhận `aihub_*` internal API key để gọi AIHub Gateway.
 
 > **Lưu ý**: Seat key gắn với 1 user. Nếu nhân viên nghỉ việc và bạn offboard họ, key tự bị revoke trong Vault — seat có thể tái gán cho người mới.
 

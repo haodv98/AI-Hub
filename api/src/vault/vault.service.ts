@@ -44,8 +44,22 @@ export class VaultService implements OnModuleInit {
   }
 
   async getProviderKey(provider: 'anthropic' | 'openai' | 'google'): Promise<string> {
-    const path = `secret/aihub/providers/${provider}`;
+    const path = `kv/aihub/providers/${provider}/shared`;
     return this.readSecret(path, 'api_key');
+  }
+
+  async writeSecret(path: string, data: Record<string, unknown>): Promise<void> {
+    const isKvV2Path = path.startsWith('kv/');
+    const resolvedPath = this.resolveKvV2Path(path);
+    if (isKvV2Path) {
+      await this.vault.write(resolvedPath, { data });
+    } else {
+      await this.vault.write(resolvedPath, data);
+    }
+
+    for (const field of Object.keys(data)) {
+      this.cache.delete(`${path}:${field}`);
+    }
   }
 
   async readSecret(path: string, field: string): Promise<string> {
@@ -56,7 +70,7 @@ export class VaultService implements OnModuleInit {
       return cached.value;
     }
 
-    const result = await this.vault.read(path);
+    const result = await this.vault.read(this.resolveKvV2Path(path));
     const value = result.data?.data?.[field] ?? result.data?.[field];
 
     if (!value) {
@@ -65,6 +79,12 @@ export class VaultService implements OnModuleInit {
 
     this.cache.set(cacheKey, { value, expiresAt: Date.now() + CACHE_TTL_MS });
     return value;
+  }
+
+  private resolveKvV2Path(path: string): string {
+    if (!path.startsWith('kv/')) return path;
+    if (path.startsWith('kv/data/')) return path;
+    return path.replace(/^kv\//, 'kv/data/');
   }
 
   private async renewToken(roleId: string, secretId: string) {

@@ -11,6 +11,13 @@ export interface AuditLogInput {
   ipAddress?: string;
 }
 
+export interface ListAuditLogsParams {
+  q?: string;
+  targetType?: string;
+  page: number;
+  limit: number;
+}
+
 @Injectable()
 export class AuditService {
   private readonly logger = new Logger(AuditService.name);
@@ -30,9 +37,67 @@ export class AuditService {
             ipAddress: input.ipAddress ?? null,
           };
           await this.prisma.auditLog.create({ data });
-      } catch (err) {
-        this.logger.error(`Audit log write failed: ${err.message}`, { input });
+      } catch (err: unknown) {
+        const message = err instanceof Error ? err.message : String(err);
+        this.logger.error(`Audit log write failed: ${message}`, { input });
       }
     });
+  }
+
+  async listLogs(params: ListAuditLogsParams) {
+    const normalizedAction = params.q?.toUpperCase() as AuditAction | undefined;
+    const actionFilter = normalizedAction && Object.values(AuditAction).includes(normalizedAction)
+      ? { action: normalizedAction }
+      : null;
+
+    const where: Prisma.AuditLogWhereInput = {
+      ...(params.targetType
+        ? { targetType: { equals: params.targetType, mode: 'insensitive' } }
+        : {}),
+      ...(params.q
+        ? {
+            OR: [
+              { targetId: { contains: params.q, mode: 'insensitive' } },
+              ...(actionFilter ? [actionFilter] : []),
+              { actor: { fullName: { contains: params.q, mode: 'insensitive' } } },
+              { actor: { email: { contains: params.q, mode: 'insensitive' } } },
+            ],
+          }
+        : {}),
+    };
+
+    const [total, rows] = await Promise.all([
+      this.prisma.auditLog.count({ where }),
+      this.prisma.auditLog.findMany({
+        where,
+        include: {
+          actor: {
+            select: {
+              fullName: true,
+              email: true,
+            },
+          },
+        },
+        orderBy: { createdAt: 'desc' },
+        skip: (params.page - 1) * params.limit,
+        take: params.limit,
+      }),
+    ]);
+
+    return {
+      total,
+      rows: rows.map((item) => ({
+        id: item.id,
+        timestamp: item.createdAt.toISOString(),
+        actor: {
+          name: item.actor?.fullName ?? 'System',
+          email: item.actor?.email ?? 'system@aihub.internal',
+        },
+        action: item.action,
+        targetType: item.targetType ?? 'SYSTEM',
+        targetId: item.targetId ?? '',
+        details: (item.details as Record<string, unknown> | null) ?? {},
+      })),
+    };
   }
 }

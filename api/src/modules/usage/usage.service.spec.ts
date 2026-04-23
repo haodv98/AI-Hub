@@ -9,7 +9,10 @@ const mockPrisma = () => ({
   $executeRaw: jest.fn().mockResolvedValue(1),
   $queryRaw: jest.fn().mockResolvedValue([]),
   apiKey: { update: jest.fn().mockResolvedValue({}) },
-  team: { findUnique: jest.fn().mockResolvedValue(null) },
+  team: {
+    findUnique: jest.fn().mockResolvedValue(null),
+    findMany: jest.fn().mockResolvedValue([]),
+  },
 });
 
 const mockBudget = () => ({
@@ -171,6 +174,46 @@ describe('UsageService', () => {
 
       const result = await service.getTeamUsage('t1', new Date('2026-01-01'), new Date('2026-01-31'));
       expect(result).toEqual(mockData);
+    });
+  });
+
+  // ── getOrgSummary ─────────────────────────────────────────────────────────
+
+  describe('getOrgSummary', () => {
+    it('returns enriched summary payload', async () => {
+      (prisma.$queryRaw as jest.Mock)
+        .mockResolvedValueOnce([{ total_cost: 100, total_tokens: 2000, total_requests: 25, team_count: 2 }])
+        .mockResolvedValueOnce([{ date: new Date('2026-01-01'), cost_usd: 100, total_tokens: 2000, request_count: 25 }])
+        .mockResolvedValueOnce([{ team_id: 'team-1', team_name: 'Platform', cost_usd: 80, total_tokens: 1500, request_count: 15 }])
+        .mockResolvedValueOnce([{ provider: 'openai', value: 60 }])
+        .mockResolvedValueOnce([{ model: 'gpt-4o', request_count: 20 }])
+        .mockResolvedValueOnce([{ user_id: 'u1', user_name: 'Alice', team_name: 'Platform', spend_usd: 70, tokens: 1200 }])
+        .mockResolvedValueOnce([{ user_id: 'u1', spend_usd: 50 }])
+        .mockResolvedValueOnce([{ avg_ms: 320 }])
+        .mockResolvedValueOnce([{ team_id: 'team-1', spend_usd: 80 }])
+        .mockResolvedValueOnce([{ total_cost: 80, total_tokens: 1800, total_requests: 20 }]);
+
+      (prisma.team.findMany as jest.Mock).mockResolvedValue([
+        { id: 'team-1', monthlyBudgetUsd: 100, _count: { members: 4 } },
+      ]);
+
+      const result = await service.getOrgSummary(new Date('2026-01-01'), new Date('2026-01-31'));
+
+      expect(result.providerBreakdown).toEqual([{ provider: 'openai', value: 60 }]);
+      expect(result.modelUsage).toEqual([{ model: 'gpt-4o', requestCount: 20 }]);
+      expect(result.topUsers[0]).toMatchObject({
+        userId: 'u1',
+        name: 'Alice',
+        team: 'Platform',
+        spendUsd: 70,
+      });
+      expect(result.latency.avgMs).toBe(320);
+      expect(result.teamUsage[0]).toMatchObject({
+        teamId: 'team-1',
+        spendUsd: 80,
+        members: 4,
+      });
+      expect(result.trends.spendPct).toBeGreaterThan(0);
     });
   });
 });

@@ -1,4 +1,11 @@
-import { PrismaClient, UserRole, UserStatus, TeamMemberTier } from '@prisma/client';
+import {
+  PrismaClient,
+  UserRole,
+  UserStatus,
+  TeamMemberTier,
+  ProviderType,
+  ProviderKeyScope,
+} from '@prisma/client';
 
 const prisma = new PrismaClient();
 const log = (step: string, msg: string) => console.log(`[seed] ${step.padEnd(16)} ${msg}`);
@@ -136,20 +143,76 @@ async function main() {
   });
   log('policies', '✓  org-default + backend-team');
 
-  // ── Provider Keys (Vault paths only) ──────────────────────────────────────
-  log('provider_keys', 'upserting...');
-  for (const provider of ['ANTHROPIC', 'OPENAI', 'GOOGLE'] as const) {
-    await prisma.providerKey.upsert({
-      where: { provider },
-      update: {},
-      create: {
-        provider,
-        vaultPath: `secret/aihub/providers/${provider.toLowerCase()}`,
-        isActive: true,
-      },
-    });
-  }
-  log('provider_keys', '✓  ANTHROPIC, OPENAI, GOOGLE');
+  // ── Provider Keys (PER_SEAT + SHARED) ─────────────────────────────────────
+  log('provider_keys', 'refreshing...');
+  // Backward-compat fix: some reset DBs still keep legacy unique(provider) constraint.
+  await prisma.$executeRawUnsafe(
+    'ALTER TABLE "provider_keys" DROP CONSTRAINT IF EXISTS "provider_keys_provider_key";',
+  );
+  await prisma.$executeRawUnsafe(
+    'DROP INDEX IF EXISTS "provider_keys_provider_key";',
+  );
+  await prisma.providerKey.deleteMany({});
+
+  const sharedKeys = [
+    {
+      provider: ProviderType.ANTHROPIC,
+      scope: ProviderKeyScope.SHARED,
+      userId: null,
+      vaultPath: 'kv/aihub/providers/anthropic/shared',
+      isActive: true,
+    },
+    {
+      provider: ProviderType.OPENAI,
+      scope: ProviderKeyScope.SHARED,
+      userId: null,
+      vaultPath: 'kv/aihub/providers/openai/shared',
+      isActive: true,
+    },
+    {
+      provider: ProviderType.GOOGLE,
+      scope: ProviderKeyScope.SHARED,
+      userId: null,
+      vaultPath: 'kv/aihub/providers/google/shared',
+      isActive: true,
+    },
+  ] as const;
+
+  const perSeatKeys = [
+    {
+      provider: ProviderType.ANTHROPIC,
+      scope: ProviderKeyScope.PER_SEAT,
+      userId: feLead.id,
+      vaultPath: `kv/aihub/providers/anthropic/users/${feLead.id}`,
+      isActive: true,
+    },
+    {
+      provider: ProviderType.ANTHROPIC,
+      scope: ProviderKeyScope.PER_SEAT,
+      userId: beLead.id,
+      vaultPath: `kv/aihub/providers/anthropic/users/${beLead.id}`,
+      isActive: true,
+    },
+    {
+      provider: ProviderType.OPENAI,
+      scope: ProviderKeyScope.PER_SEAT,
+      userId: feDev.id,
+      vaultPath: `kv/aihub/providers/openai/users/${feDev.id}`,
+      isActive: true,
+    },
+    {
+      provider: ProviderType.OPENAI,
+      scope: ProviderKeyScope.PER_SEAT,
+      userId: beDev.id,
+      vaultPath: `kv/aihub/providers/openai/users/${beDev.id}`,
+      isActive: true,
+    },
+  ] as const;
+
+  await prisma.providerKey.createMany({
+    data: [...sharedKeys, ...perSeatKeys],
+  });
+  log('provider_keys', '✓  SHARED(3) + PER_SEAT(4)');
 
   console.log('────────────────────────────────────────────────────────────');
   console.log('[seed] Done.');

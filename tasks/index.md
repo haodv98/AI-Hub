@@ -44,7 +44,7 @@
 |------|-------|----------|
 | [phase1-foundation.md](phase1-foundation.md) | Phase 1 (Week 1–3) | Infra, Prisma schema, APISix+Keycloak, NestJS scaffold, LiteLLM, key mgmt |
 | [phase2-mvp.md](phase2-mvp.md) | Phase 2 (Week 4–6) | Policy engine (NestJS modules), Admin Portal, Pilot |
-| [phase3-rollout.md](phase3-rollout.md) | Phase 3 (Week 7–10) | All-team rollout, Slack, HR webhook, on-prem K8s, CloudWatch, daily backup |
+| [phase3-rollout.md](phase3-rollout.md) | Phase 3 (Week 7–10) | All-team rollout, SMTP email notifications, HR webhook, SSO, Monitoring (Prometheus/Loki/Grafana), on-prem K8s, CloudWatch, daily backup |
 | [phase4-optimization.md](phase4-optimization.md) | Phase 4 (Week 11–16) | Cost optimization, advanced features, analytics, cloud migration prep |
 | [cross-cutting.md](cross-cutting.md) | Ongoing | Testing, ADR maintenance |
 

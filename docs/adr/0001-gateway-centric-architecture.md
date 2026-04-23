@@ -14,6 +14,11 @@ Cần một kiến trúc cho phép: kiểm soát chi phí toàn tổ chức, aud
 
 Áp dụng kiến trúc **Gateway-Centric**: mọi request AI từ nhân viên đều phải đi qua một proxy gateway duy nhất. Nhân viên không giữ API key trực tiếp của provider — họ chỉ có internal key mà gateway validate và route đến đúng provider.
 
+Provider key routing tuân theo 2-tier key model:
+- Ưu tiên `PER_SEAT` key của user tại `kv/aihub/providers/{provider}/users/{user_id}`
+- Nếu không có thì fallback sang `SHARED` key tại `kv/aihub/providers/{provider}/shared`
+- Mục tiêu: tránh seat quota contention cho nhóm dùng nhiều (dev/lead), vẫn giữ shared pool cho nhóm dùng ít
+
 3-layer model:
 - Layer 1: Admin Portal + Self-Service UI (React SPA)
 - Layer 2: Core Platform (Auth, Policy Engine, Usage Tracking, API Gateway)

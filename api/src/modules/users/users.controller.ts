@@ -3,7 +3,12 @@ import { ApiTags, ApiOperation, ApiQuery, ApiParam } from '@nestjs/swagger';
 import { Auth } from '../../common/decorators/auth.decorator';
 import { PaginationDto } from '../../common/dto/pagination.dto';
 import { ApiResponse } from '../../common/dto/response.dto';
-import { UsersService, CreateUserDto, UpdateUserDto } from './users.service';
+import {
+  UsersService,
+  CreateUserDto,
+  UpdateUserDto,
+  AssignPerSeatKeyDto,
+} from './users.service';
 import { UserRole, UserStatus } from '@prisma/client';
 
 @ApiTags('users')
@@ -63,5 +68,35 @@ export class UsersController {
   @ApiParam({ name: 'id', type: String })
   async offboard(@Param('id') id: string, @Request() req: any) {
     return ApiResponse.ok(await this.users.offboard(id, req.user.id));
+  }
+
+  @Post(':id/provider-keys/assign')
+  @Auth(UserRole.IT_ADMIN, UserRole.SUPER_ADMIN)
+  @ApiOperation({
+    summary:
+      'Assign PER_SEAT provider key to user (stored in Vault); generate internal API key if user has none',
+  })
+  @ApiParam({ name: 'id', type: String })
+  async assignPerSeatKey(@Param('id') id: string, @Body() dto: AssignPerSeatKeyDto, @Request() req: any) {
+    return ApiResponse.ok(await this.users.assignPerSeatKey(id, dto, req.user.id));
+  }
+
+  @Post('provider-keys/import')
+  @Auth(UserRole.IT_ADMIN, UserRole.SUPER_ADMIN)
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary:
+      'Bulk import PER_SEAT provider keys via CSV content (internal key issuance included for users missing API key)',
+  })
+  async importPerSeatKeys(@Body('csv') csv: string, @Request() req: any) {
+    return ApiResponse.ok(await this.users.bulkImportPerSeatKeys(csv, req.user.id));
+  }
+
+  @Post('bulk-import')
+  @Auth(UserRole.IT_ADMIN, UserRole.SUPER_ADMIN)
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Bulk import users via CSV (email,full_name,team,tier)' })
+  async bulkImportUsers(@Body('csv') csv: string, @Request() req: any) {
+    return ApiResponse.ok(await this.users.bulkImportUsers(csv, req.user.id));
   }
 }

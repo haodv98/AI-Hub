@@ -31,14 +31,26 @@ done
 echo "Vault is ready."
 
 # Enable KV v2 secrets engine
-vault_exec secrets enable -path=secret kv-v2 2>/dev/null || echo "  KV v2 already enabled"
+vault_exec secrets enable -path=kv kv-v2 2>/dev/null || echo "  KV v2 already enabled"
 
 # Create api policy
 vault_exec policy write api-policy - <<'EOF'
-path "secret/data/aihub/providers/*" {
+path "kv/data/aihub/providers/*/shared" {
   capabilities = ["read"]
 }
-path "secret/data/aihub/internal/*" {
+path "kv/data/aihub/providers/*/users/*" {
+  capabilities = ["read", "create", "update"]
+}
+path "kv/metadata/aihub/providers/*" {
+  capabilities = ["read", "list"]
+}
+path "kv/metadata/aihub/providers/*/users" {
+  capabilities = ["read", "list"]
+}
+path "kv/metadata/aihub/providers/*/users/*" {
+  capabilities = ["read", "list"]
+}
+path "kv/data/aihub/internal/*" {
   capabilities = ["read"]
 }
 EOF
@@ -60,9 +72,9 @@ ROLE_ID=$(vault_exec read -field=role_id auth/approle/role/api-role/role-id)
 SECRET_ID=$(vault_exec write -field=secret_id -f auth/approle/role/api-role/secret-id)
 
 # Seed dev-only placeholder provider keys (NEVER use real keys here)
-vault_exec kv put secret/aihub/providers/anthropic api_key="sk-ant-dev-placeholder-not-real"
-vault_exec kv put secret/aihub/providers/openai    api_key="sk-openai-dev-placeholder-not-real"
-vault_exec kv put secret/aihub/providers/google    api_key="AIzaSy-dev-placeholder-not-real"
+vault_exec kv put kv/aihub/providers/anthropic/shared api_key="sk-ant-dev-placeholder-not-real"
+vault_exec kv put kv/aihub/providers/openai/shared    api_key="sk-openai-dev-placeholder-not-real"
+vault_exec kv put kv/aihub/providers/google/shared    api_key="AIzaSy-dev-placeholder-not-real"
 echo "  Dev provider keys seeded"
 
 # Write credentials to .env.vault (git-ignored)

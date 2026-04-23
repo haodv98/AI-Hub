@@ -25,16 +25,17 @@
     "@nestjs/schedule": "^4.0.0",
     "@nestjs/swagger": "^7.0.0",
     "@nestjs/throttler": "^5.0.0",
-    "helmet": "^8.0.0",
     "@prisma/client": "^6.0.0",
     "axios": "^1.6.0",
     "cache-manager": "^5.2.0",
     "class-transformer": "^0.5.1",
     "class-validator": "^0.14.0",
     "crypto": "^1.0.1",
+    "helmet": "^8.0.0",
     "ioredis": "^5.3.2",
     "nestjs-pino": "^3.5.0",
     "node-vault": "^0.10.2",
+    "nodemailer": "^8.0.5",
     "pino-http": "^9.0.0",
     "reflect-metadata": "^0.1.13",
     "rxjs": "^7.8.1",
@@ -48,6 +49,7 @@
     "@types/ioredis": "^4.28.10",
     "@types/jest": "^29.5.2",
     "@types/node": "^20.3.1",
+    "@types/nodemailer": "^8.0.0",
     "@typescript-eslint/eslint-plugin": "^6.0.0",
     "@typescript-eslint/parser": "^6.0.0",
     "eslint": "^8.42.0",
@@ -63,11 +65,19 @@
     "seed": "ts-node prisma/seed.ts"
   },
   "jest": {
-    "moduleFileExtensions": ["js", "json", "ts"],
+    "moduleFileExtensions": [
+      "js",
+      "json",
+      "ts"
+    ],
     "rootDir": "src",
     "testRegex": ".*\\.spec\\.ts$",
-    "transform": { "^.+\\.(t|j)s$": "ts-jest" },
-    "collectCoverageFrom": ["**/*.(t|j)s"],
+    "transform": {
+      "^.+\\.(t|j)s$": "ts-jest"
+    },
+    "collectCoverageFrom": [
+      "**/*.(t|j)s"
+    ],
     "coverageDirectory": "../coverage",
     "testEnvironment": "node"
   }

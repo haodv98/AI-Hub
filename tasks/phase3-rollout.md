@@ -1,6 +1,6 @@
 # Phase 3: Company Rollout (Week 7–10)
 
-> **Goal:** Tất cả 9 teams onboard, usage dashboard mature, integrations live (Slack, HR webhook, Keycloak SSO), monitoring complete.
+> **Goal:** Tất cả 9 teams onboard, usage dashboard mature, integrations live (SMTP email, HR webhook, Keycloak SSO), monitoring complete.
 >
 > **Stack:** NestJS modules | APISix production | Keycloak LDAP sync | On-Prem K8s bare-metal | CloudWatch exporter | Daily backup
 
@@ -8,14 +8,14 @@
 
 ## 3A. All-Team Policy Configuration
 
-- [ ] TASK-300: Create policy templates cho tất cả 9 teams
+- [x] TASK-300: Create policy templates cho tất cả 9 teams
   - File: `scripts/seed-policies.ts` (ts-node, gọi API endpoints)
   - Dependencies: TASK-200
   - Risk: medium — sai policies block cả team; cần review kỹ với team leads
   - Estimate: M
   - Notes: Per allocation matrix trong plan.md: Frontend, Backend, DevOps, QA, Data/ML, Product/PM, Design/UX, HR/Admin, Sales/BD. Mỗi team có member-tier và lead/senior-tier policies. Budget caps per spec. Validate với `POST /api/v1/policies/simulate` trước khi apply.
 
-- [ ] TASK-301: Implement bulk user import endpoint
+- [x] TASK-301: Implement bulk user import endpoint
   - File: `api/src/modules/users/users.controller.ts` (add endpoint)
   - Dependencies: TASK-080
   - Risk: medium — large import có thể timeout; cần background processing
@@ -24,10 +24,10 @@
 
 - [ ] TASK-302: Create bulk key generation script
   - File: `scripts/bulk-keygen.ts` (ts-node)
-  - Dependencies: TASK-073, TASK-301
+  - Dependencies: TASK-073, TASK-301, TASK-333, TASK-334
   - Risk: medium — plaintext keys phải được deliver securely; script output cần encryption hoặc secure channel
   - Estimate: S
-  - Notes: Generate keys cho tất cả active users chưa có key bằng cách gọi `POST /api/v1/keys` endpoint. Output: `bulk-keys-YYYY-MM-DD.csv` (user_email, key_plaintext). Distribute securely (Slack DM per TASK-333 hoặc portal). Delete sau khi distribute.
+  - Notes: Generate keys cho tất cả active users chưa có key bằng cách gọi `POST /api/v1/keys` endpoint. KHONG ghi `key_plaintext` ra disk CSV. Với mỗi key mới, enqueue ngay secure delivery flow của TASK-333 (one-time reveal link + TTL). Script output chỉ gồm summary `{ success, errors[] }` và metadata không chứa secret.
 
 ---
 
@@ -65,12 +65,12 @@
   - Estimate: L
   - Notes: `@nestjs/schedule` `@Cron('0 6 1 * *')` (1st of month, 6:00 AM). Generates: total spend, vs previous month (% change), per-team breakdown, per-provider breakdown, top 10 users by cost, unused seats (0 API calls), budget utilization rate. Store JSON + PDF trong `reports` DB table. Retry 3x.
 
-- [ ] TASK-321: Implement report delivery via notification channels
+- [x] TASK-321: Implement report delivery via notification channels
   - File: `api/src/modules/reports/reports.service.ts` (extend)
-  - Dependencies: TASK-320, TASK-332
+  - Dependencies: TASK-320, TASK-331
   - Risk: low
   - Estimate: S
-  - Notes: On report generated: store trong DB, notify `it_admin` + `super_admin` via Slack. Accessible tại admin portal `/reports`. Auto-notify CTO/CFO list configurable via `REPORT_RECIPIENTS` env var (comma-separated emails/Slack user IDs).
+  - Notes: On report generated: store trong DB, notify `it_admin` + `super_admin` via email. Accessible tại admin portal `/reports`. Auto-notify CTO/CFO list configurable via `REPORT_RECIPIENTS` env var (comma-separated emails).
 
 - [ ] TASK-322: Implement reports page in admin portal
   - File: `web/src/pages/Reports.tsx`
@@ -81,46 +81,53 @@
 
 ---
 
-## 3D. Slack Bot Integration
+## 3D. SMTP Notification Integration
 
-- [ ] TASK-330: Create Slack app và NestJS SlackModule
-  - File: `api/src/modules/integrations/slack/slack.module.ts`, `docs/slack-setup.md`
+- [x] TASK-330: Create SMTP integration module và mail provider config
+  - File: `api/src/modules/integrations/email/email.module.ts`, `docs/smtp-setup.md`
   - Dependencies: TASK-091
-  - Risk: low — cần Slack workspace admin access
+  - Risk: medium — SMTP auth/TLS misconfiguration có thể fail toàn bộ notification pipeline
   - Estimate: S
-  - Notes: Create Slack app tại api.slack.com. Bot token scopes: `chat:write`, `commands`, `users:read`. Store `SLACK_BOT_TOKEN` và `SLACK_SIGNING_SECRET` trong Vault (TASK-015). `SlackService` dùng `@slack/web-api`. Event subscriptions URL: `https://<aihub-domain>/api/v1/slack/events`.
+  - Notes: Create `EmailModule` dùng `nodemailer` SMTP transport. Store `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASSWORD`, `SMTP_FROM`, `AIHUB_OPS_EMAILS`, `AIHUB_SUPPORT_EMAIL`, `REPORT_RECIPIENTS` trong Vault (TASK-015). Enforce STARTTLS/TLS, connection timeout, retry policy. Add startup validation: required envs present + email lists parse successfully.
 
-- [ ] TASK-331: Implement Slack slash commands handler
-  - File: `api/src/modules/integrations/slack/slack.controller.ts`
+- [x] TASK-331: Implement email template system và outbound queue
+  - File: `api/src/modules/integrations/email/email.service.ts`, `api/src/modules/integrations/email/templates/`
   - Dependencies: TASK-330
-  - Risk: medium — Slack yêu cầu response trong 3 giây; cần async processing cho slow queries
+  - Risk: medium — mail burst có thể bị rate limited; cần queue + retry/backoff
   - Estimate: L
-  - Notes: `POST /api/v1/slack/commands` — verify `X-Slack-Signature` với HMAC SHA-256. Commands: `/aihub status` (usage summary: spend MTD, remaining budget, requests today), `/aihub key rotate` (trigger via API, confirm với block actions), `/aihub team <name>` (team summary, `team_lead` role check). Respond 200 immediately, enqueue job via BullMQ for slow lookups.
+  - Notes: Implement template IDs: `budget_alert`, `team_budget_alert`, `key_rotation_reminder`, `monthly_report_ready`, `onboarding_key_delivery`. Use BullMQ queue cho async send, retry 3x exponential backoff, dead-letter tracking, audit metadata (recipient, template, status, sent_at, error_code).
 
-- [ ] TASK-332: Implement Slack notification delivery cho alerts
-  - File: `api/src/modules/integrations/slack/slack.service.ts`
-  - Dependencies: TASK-330, TASK-221
+- [x] TASK-332: Implement email notification delivery cho alerts
+  - File: `api/src/modules/integrations/email/email.service.ts`
+  - Dependencies: TASK-331, TASK-221
   - Risk: low
   - Estimate: M
-  - Notes: `SlackService.sendDM(userId, blocks)` và `sendChannel(channelId, blocks)`. Budget alert: DM tới affected user. Team budget alert: DM tới team lead + `#aihub-ops` channel. Key rotation reminder: DM với instructions. Message format: rich blocks với action buttons. `AlertsModule` calls `SlackService` khi alert fires.
+  - Notes: `EmailService.sendToUser(userId, template, payload)` và `sendToGroup(group, template, payload)`. Budget alert: email tới affected user. Team budget alert: email tới team lead + ops distribution list (`AIHUB_OPS_EMAILS`). Key rotation reminder: email với instructions link. `AlertsModule` calls `EmailService` khi alert fires.
 
-- [ ] TASK-333: Implement Slack-based key delivery cho new members
-  - File: `api/src/modules/integrations/slack/slack.service.ts` (extend)
-  - Dependencies: TASK-332, TASK-070
-  - Risk: medium — gửi keys qua Slack DM; document risk; không phải plaintext log
+- [x] TASK-333: Implement secure email-based key delivery cho new members
+  - File: `api/src/modules/integrations/email/email.service.ts` (extend)
+  - Dependencies: TASK-332, TASK-334, TASK-070
+  - Risk: medium — key delivery qua email cần one-time access control và expiry
+  - Estimate: M
+  - Notes: On new key generation (opt-in per org setting): send one-time secure link (tokenized, TTL 24h) thay vì gửi plaintext key trực tiếp trong email. Recipient opens portal page để reveal key one-time + setup instructions. Fallback: nếu mail delivery fail/bounce → portal delivery + IT admin manual handoff.
+
+- [x] TASK-334: Implement OneTimeTokenService cho secure key reveal links
+  - File: `api/src/modules/integrations/email/one-time-token.service.ts`
+  - Dependencies: TASK-091
+  - Risk: medium — token replay hoặc TTL handling sai có thể lộ key
   - Estimate: S
-  - Notes: On new key generation (opt-in per org setting): DM tới user với welcome message, API key (plaintext, one-time), setup instructions link. Slack scheduled_message deletion sau 24h. Fallback: nếu Slack user không tìm thấy bằng email → fallback tới portal delivery.
+  - Notes: Redis-backed single-use token (`SET NX EX`). Payload: subject, purpose (`key_reveal`), resourceId, expiresAt. Consume token is atomic and invalidates immediately after first use.
 
 ---
 
 ## 3E. HR System Integration
 
-- [ ] TASK-340: Implement HR webhook endpoint
+- [x] TASK-340: Implement HR webhook endpoint
   - File: `api/src/modules/integrations/hr/hr.controller.ts`, `api/src/modules/integrations/hr/hr.module.ts`
   - Dependencies: TASK-080, TASK-082, TASK-073
   - Risk: medium — HR webhook format thay đổi theo provider; cần flexible payload parsing
   - Estimate: L
-  - Notes: `POST /api/v1/webhooks/hr` — verify webhook signature (HMAC header). Events: `employee.onboarded` (create user via `UsersService`, map dept → team, map title → tier, generate key, DM via Slack), `employee.offboarded` (revoke all keys, deactivate user, audit log), `employee.transferred` (update team, regenerate key). Idempotent via event ID dedup (Redis `SET NX`).
+  - Notes: `POST /api/v1/webhooks/hr` — verify webhook signature (HMAC header). Events: `employee.onboarded` (create user via `UsersService`, map dept → team, map title → tier, generate key, invoke TASK-333 secure one-time reveal email flow), `employee.offboarded` (revoke all keys, deactivate user, audit log), `employee.transferred` (update team, regenerate key). Idempotent via event ID dedup (Redis `SET NX`).
 
 - [ ] TASK-341: Implement department-to-team và title-to-tier mapping config
   - File: `api/src/modules/integrations/hr/hr-mapping.config.ts`
@@ -223,7 +230,7 @@
   - Dependencies: TASK-372
   - Risk: medium — quá nhiều alerts gây alert fatigue; quá ít bỏ sót incidents
   - Estimate: M
-  - Notes: Alert rules per NFR: `GatewayErrorRate > 5%` (5min window), `GatewayP99Latency > 200ms` (10min), `ProviderDown` (2min), `DBConnectionPool > 80%` (5min), `RedisMemory > 80%`. Alertmanager route → Slack `#aihub-ops`. Runbook link: `docs/runbook.md#<section>` trong annotation.
+  - Notes: Alert rules per NFR: `GatewayErrorRate > 5%` (5min window), `GatewayP99Latency > 75ms` (warning, 5min), `GatewayP99Latency > 150ms` (critical, 10min), `ProviderDown` (2min), `DBConnectionPool > 80%` (5min), `RedisMemory > 80%`. Alertmanager route → email distribution list `AIHUB_OPS_EMAILS`. Runbook link: `docs/runbook.md#<section>` trong annotation.
 
 - [ ] TASK-374: Configure Loki + Promtail cho centralized logging
   - File: `infra/loki/`, `infra/promtail/config.yml`
@@ -304,7 +311,7 @@
   - Dependencies: TASK-300, TASK-302, TASK-390
   - Risk: medium — nếu gateway có issues trong onboarding, ấn tượng đầu tiên xấu
   - Estimate: L
-  - Notes: Monitor gateway logs trong mỗi batch (48h đầu sau onboarding). Track: successful first API call per user. Escalation path: Slack channel `#aihub-support`. IT Admin on-call trong 24h sau mỗi batch session.
+  - Notes: Monitor gateway logs trong mỗi batch (48h đầu sau onboarding). Track: successful first API call per user. Escalation path: support mailbox từ env `AIHUB_SUPPORT_EMAIL`. IT Admin on-call trong 24h sau mỗi batch session.
 
 ---
 
@@ -329,8 +336,9 @@
 
 - [ ] Tất cả 9 teams onboarded (≥ 95% employees có active keys)
 - [ ] Active usage từ ≥ 70% provisioned users
-- [ ] Monthly report tự động generate và deliver via Slack
-- [ ] Slack bot operational (`/aihub status`, `/aihub key rotate`, notifications)
+- [ ] Monthly report tự động generate và deliver via email
+- [ ] SMTP notification pipeline operational (alerts, reports, onboarding key delivery)
+- [ ] SMTP delivery SLO validated: success rate >= 99%, bounce/failure monitored, retry/dead-letter flow verified
 - [ ] HR webhook xử lý onboard/offboard/transfer
 - [ ] Keycloak LDAP sync active — employees login với company credentials
 - [ ] Monitoring dashboards và alerts configured (4 Grafana dashboards)

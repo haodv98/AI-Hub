@@ -17,11 +17,12 @@ export default defineConfig({
   build: {
     rolldownOptions: {
       output: {
-        manualChunks: {
-          react: ['react', 'react-dom'],
-          router: ['react-router'],
-          query: ['@tanstack/react-query'],
-          charts: ['recharts'],
+        manualChunks(id) {
+          if (id.includes('node_modules/react') || id.includes('node_modules/react-dom')) return 'react';
+          if (id.includes('node_modules/react-router')) return 'router';
+          if (id.includes('node_modules/@tanstack/react-query')) return 'query';
+          if (id.includes('node_modules/recharts')) return 'charts';
+          return undefined;
         },
       },
     },

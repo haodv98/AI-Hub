@@ -4,17 +4,40 @@ import { UsersService } from './users.service';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
 import { KeysService } from '../keys/keys.service';
-import { UserRole, UserStatus } from '@prisma/client';
+import { UserRole, UserStatus, ProviderType } from '@prisma/client';
+import { VaultService } from '../../vault/vault.service';
+import { EmailService } from '../integrations/email/email.service';
 
-const mockPrisma = () => ({
-  user: {
+const mockPrisma = () => {
+  const user = {
     findMany: jest.fn(),
     findUnique: jest.fn(),
     create: jest.fn(),
     update: jest.fn(),
+    delete: jest.fn(),
     count: jest.fn(),
-  },
-});
+  };
+  const providerKey = {
+    updateMany: jest.fn(),
+    findFirst: jest.fn(),
+    update: jest.fn(),
+    create: jest.fn(),
+  };
+  const team = {
+    findMany: jest.fn(),
+  };
+  const teamMember = {
+    create: jest.fn(),
+  };
+
+  return {
+    user,
+    providerKey,
+    team,
+    teamMember,
+    $transaction: jest.fn().mockImplementation(async (fn: any) => fn({ user, teamMember })),
+  };
+};
 
 const mockAudit = () => ({
   log: jest.fn(),
@@ -22,6 +45,16 @@ const mockAudit = () => ({
 
 const mockKeys = () => ({
   revokeAllUserKeys: jest.fn().mockResolvedValue(2),
+  getMyKey: jest.fn().mockResolvedValue({ id: 'existing-key' }),
+  generateKey: jest.fn().mockResolvedValue({ key: { id: 'k-generated' }, plaintext: 'aihub_prod_generated' }),
+});
+
+const mockVault = () => ({
+  writeSecret: jest.fn().mockResolvedValue(undefined),
+});
+
+const mockEmail = () => ({
+  sendOnboardingKeyDelivery: jest.fn().mockResolvedValue(undefined),
 });
 
 const fakeUser = {
@@ -41,6 +74,8 @@ describe('UsersService', () => {
   let service: UsersService;
   let prisma: ReturnType<typeof mockPrisma>;
   let keys: ReturnType<typeof mockKeys>;
+  let vault: ReturnType<typeof mockVault>;
+  let email: ReturnType<typeof mockEmail>;
 
   beforeEach(async () => {
     const module: TestingModule = await Test.createTestingModule({
@@ -49,12 +84,16 @@ describe('UsersService', () => {
         { provide: PrismaService, useFactory: mockPrisma },
         { provide: AuditService, useFactory: mockAudit },
         { provide: KeysService, useFactory: mockKeys },
+        { provide: VaultService, useFactory: mockVault },
+        { provide: EmailService, useFactory: mockEmail },
       ],
     }).compile();
 
     service = module.get(UsersService);
     prisma = module.get(PrismaService) as any;
     keys = module.get(KeysService) as any;
+    vault = module.get(VaultService) as any;
+    email = module.get(EmailService) as any;
   });
 
   afterEach(() => jest.clearAllMocks());
@@ -181,6 +220,12 @@ describe('UsersService', () => {
       await service.offboard('u1', 'actor1');
 
       expect(keys.revokeAllUserKeys).toHaveBeenCalledWith('u1', 'actor1');
+      expect(prisma.providerKey.updateMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({ userId: 'u1', scope: 'PER_SEAT' }),
+          data: expect.objectContaining({ isActive: false }),
+        }),
+      );
     });
 
     it('sets status to OFFBOARDED and records offboardedAt', async () => {
@@ -212,6 +257,118 @@ describe('UsersService', () => {
     it('throws NotFoundException when user does not exist', async () => {
       (prisma.user.findUnique as jest.Mock).mockResolvedValue(null);
       await expect(service.offboard('missing', 'actor1')).rejects.toThrow(NotFoundException);
+    });
+  });
+
+  describe('assignPerSeatKey', () => {
+    it('writes secret and creates provider key record when not existing', async () => {
+      (prisma.user.findUnique as jest.Mock).mockResolvedValue(fakeUser);
+      (prisma.providerKey.findFirst as jest.Mock).mockResolvedValue(null);
+      (prisma.providerKey.create as jest.Mock).mockResolvedValue({});
+      (keys.getMyKey as jest.Mock).mockResolvedValue(null);
+      (keys.generateKey as jest.Mock).mockResolvedValue({ plaintext: 'aihub_prod_generated' });
+
+      const result = await service.assignPerSeatKey(
+        'u1',
+        { provider: ProviderType.ANTHROPIC, apiKey: 'sk-ant-123' },
+        'actor1',
+      );
+
+      expect(vault.writeSecret).toHaveBeenCalledWith(
+        'kv/aihub/providers/anthropic/users/u1',
+        { api_key: 'sk-ant-123' },
+      );
+      expect(prisma.providerKey.create).toHaveBeenCalled();
+      expect(keys.generateKey).toHaveBeenCalledWith('u1', 'actor1');
+      expect(result.issuedApiKey).toBe('aihub_prod_generated');
+    });
+  });
+
+  describe('bulkImportPerSeatKeys', () => {
+    it('returns error for unknown provider value', async () => {
+      const csv = ['email,provider,api_key', 'a@company.com,unknown,sk-123'].join('\n');
+      const result = await service.bulkImportPerSeatKeys(csv, 'actor1');
+      expect(result.success).toBe(0);
+      expect(result.errors.length).toBeGreaterThan(0);
+    });
+  });
+
+  describe('bulkImportUsers', () => {
+    it('validates all rows first and returns errors without processing', async () => {
+      (prisma.team.findMany as jest.Mock).mockResolvedValue([{ id: 't1', name: 'Backend' }]);
+      (prisma.user.findMany as jest.Mock).mockResolvedValue([]);
+      const csv = ['email,full_name,team,tier', 'a@company.com,User A,Backend,MEMBER', 'b@company.com,User B,MissingTeam,LEAD'].join('\n');
+
+      const result = await service.bulkImportUsers(csv, 'actor1');
+      expect(result.success).toBe(0);
+      expect(result.errors.length).toBeGreaterThan(0);
+      expect(result.deliveryQueued).toBe(0);
+      expect(prisma.user.create).not.toHaveBeenCalled();
+    });
+
+    it('creates user + membership + internal key when CSV is valid', async () => {
+      (prisma.team.findMany as jest.Mock).mockResolvedValue([{ id: 't1', name: 'Backend' }]);
+      (prisma.user.findMany as jest.Mock).mockResolvedValue([]);
+      (prisma.user.create as jest.Mock).mockResolvedValue({ id: 'u-new', email: 'a@company.com' });
+      (prisma.teamMember.create as jest.Mock).mockResolvedValue({});
+
+      const csv = ['email,full_name,team,tier', 'a@company.com,User A,Backend,MEMBER'].join('\n');
+      const result = await service.bulkImportUsers(csv, 'actor1');
+
+      expect(result.success).toBe(1);
+      expect(result.deliveryQueued).toBe(1);
+      expect(prisma.user.create).toHaveBeenCalled();
+      expect(prisma.teamMember.create).toHaveBeenCalled();
+      expect(keys.generateKey).toHaveBeenCalledWith('u-new', 'actor1');
+      expect(email.sendOnboardingKeyDelivery).toHaveBeenCalledWith({
+        userId: 'u-new',
+        email: 'a@company.com',
+        keyId: 'k-generated',
+        keyPlaintext: 'aihub_prod_generated',
+      });
+    });
+
+    it('returns partial success when onboarding email delivery fails', async () => {
+      (prisma.team.findMany as jest.Mock).mockResolvedValue([{ id: 't1', name: 'Backend' }]);
+      (prisma.user.findMany as jest.Mock).mockResolvedValue([]);
+      (prisma.user.create as jest.Mock)
+        .mockResolvedValueOnce({ id: 'u-new-1', email: 'a@company.com' })
+        .mockResolvedValueOnce({ id: 'u-new-2', email: 'b@company.com' });
+      (prisma.teamMember.create as jest.Mock).mockResolvedValue({});
+      (keys.generateKey as jest.Mock)
+        .mockResolvedValueOnce({ key: { id: 'k-1' }, plaintext: 'aihub_prod_generated_1' })
+        .mockResolvedValueOnce({ key: { id: 'k-2' }, plaintext: 'aihub_prod_generated_2' });
+      (email.sendOnboardingKeyDelivery as jest.Mock)
+        .mockResolvedValueOnce(undefined)
+        .mockRejectedValueOnce(new Error('SMTP down'));
+
+      const csv = [
+        'email,full_name,team,tier',
+        'a@company.com,User A,Backend,MEMBER',
+        'b@company.com,User B,Backend,MEMBER',
+      ].join('\n');
+
+      const result = await service.bulkImportUsers(csv, 'actor1');
+      expect(result.success).toBe(2);
+      expect(result.deliveryQueued).toBe(1);
+      expect(result.errors).toHaveLength(1);
+      expect(result.errors[0].row).toBe(3);
+      expect(prisma.user.delete).not.toHaveBeenCalled();
+    });
+
+    it('rolls back created user when key generation fails', async () => {
+      (prisma.team.findMany as jest.Mock).mockResolvedValue([{ id: 't1', name: 'Backend' }]);
+      (prisma.user.findMany as jest.Mock).mockResolvedValue([]);
+      (prisma.user.create as jest.Mock).mockResolvedValue({ id: 'u-new-1', email: 'a@company.com' });
+      (prisma.teamMember.create as jest.Mock).mockResolvedValue({});
+      (keys.generateKey as jest.Mock).mockRejectedValue(new Error('keygen failed'));
+
+      const csv = ['email,full_name,team,tier', 'a@company.com,User A,Backend,MEMBER'].join('\n');
+      const result = await service.bulkImportUsers(csv, 'actor1');
+
+      expect(result.success).toBe(0);
+      expect(result.errors).toHaveLength(1);
+      expect(prisma.user.delete).toHaveBeenCalledWith({ where: { id: 'u-new-1' } });
     });
   });
 });

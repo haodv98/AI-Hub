@@ -14,6 +14,8 @@ import { PoliciesModule } from './modules/policies/policies.module';
 import { AlertsModule } from './modules/alerts/alerts.module';
 import { UsageModule } from './modules/usage/usage.module';
 import { GatewayModule } from './modules/gateway/gateway.module';
+import { ReportsModule } from './modules/reports/reports.module';
+import { HrModule } from './modules/integrations/hr/hr.module';
 
 @Module({
   imports: [
@@ -54,6 +56,8 @@ import { GatewayModule } from './modules/gateway/gateway.module';
     AlertsModule,
     UsageModule,
     GatewayModule,
+    ReportsModule,
+    HrModule,
   ],
 })
 export class AppModule {}

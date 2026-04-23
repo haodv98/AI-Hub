@@ -1,6 +1,9 @@
 import { Injectable, Logger } from '@nestjs/common';
+import { TeamMemberTier } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { RedisService } from '../../redis/redis.service';
+import { EmailService } from '../integrations/email/email.service';
+import { EMAIL_TEMPLATES } from '../integrations/email/email.types';
 
 const BUDGET_THRESHOLDS = [70, 90, 100] as const;
 type Threshold = (typeof BUDGET_THRESHOLDS)[number];
@@ -16,6 +19,7 @@ export class AlertsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly redis: RedisService,
+    private readonly email: EmailService,
   ) {}
 
   // ── User Budget Alerts ─────────────────────────────────────────────────────
@@ -50,6 +54,16 @@ export class AlertsService {
       this.logger.warn(
         `Budget alert ${threshold}% for user ${userId}: $${currentCostUsd.toFixed(2)} / $${budgetCapUsd.toFixed(2)}`,
       );
+      try {
+        await this.email.sendToUser(userId, EMAIL_TEMPLATES.BUDGET_ALERT, {
+          threshold,
+          currentCost: currentCostUsd.toFixed(2),
+          budgetCap: budgetCapUsd.toFixed(2),
+        });
+      } catch (err: unknown) {
+        const message = err instanceof Error ? err.message : String(err);
+        this.logger.warn(`Failed to send user budget alert email: ${message}`);
+      }
     }
   }
 
@@ -84,6 +98,17 @@ export class AlertsService {
       this.logger.warn(
         `Team budget alert ${threshold}% for team ${teamId}: $${currentCostUsd.toFixed(2)} / $${budgetCapUsd.toFixed(2)}`,
       );
+      try {
+        await this.notifyTeamBudgetAlert({
+          teamId,
+          threshold,
+          currentCostUsd,
+          budgetCapUsd,
+        });
+      } catch (err: unknown) {
+        const message = err instanceof Error ? err.message : String(err);
+        this.logger.warn(`Failed to send team budget alert email: ${message}`);
+      }
     }
   }
 
@@ -127,6 +152,12 @@ export class AlertsService {
       this.logger.warn(
         `Spike detected for team ${teamId}: today $${todaySpendUsd.toFixed(2)} = ${spikeMultiple.toFixed(1)}x 7-day avg $${avgCost.toFixed(2)}`,
       );
+      await this.email.sendToGroup('ops', EMAIL_TEMPLATES.SPIKE_DETECTED, {
+        teamId,
+        currentCost: todaySpendUsd.toFixed(2),
+        baselineCost: avgCost.toFixed(2),
+        spikeMultiple: spikeMultiple.toFixed(2),
+      });
     } catch (err: unknown) {
       // Spike detection is non-critical; log and continue
       const message = err instanceof Error ? err.message : String(err);
@@ -159,5 +190,41 @@ export class AlertsService {
       const message = err instanceof Error ? err.message : String(err);
       this.logger.error(`Failed to persist alert: ${message}`);
     }
+  }
+
+  private async notifyTeamBudgetAlert(data: {
+    teamId: string;
+    threshold: Threshold;
+    currentCostUsd: number;
+    budgetCapUsd: number;
+  }): Promise<void> {
+    const leads = await this.prisma.teamMember.findMany({
+      where: { teamId: data.teamId, tier: TeamMemberTier.LEAD },
+      select: { userId: true },
+    });
+
+    const leadResults = await Promise.allSettled(
+      leads.map((lead) =>
+        this.email.sendToUser(lead.userId, EMAIL_TEMPLATES.TEAM_BUDGET_ALERT, {
+          teamId: data.teamId,
+          threshold: data.threshold,
+          currentCost: data.currentCostUsd.toFixed(2),
+          budgetCap: data.budgetCapUsd.toFixed(2),
+        }),
+      ),
+    );
+    const failedLeadNotifications = leadResults.filter((result) => result.status === 'rejected');
+    if (failedLeadNotifications.length > 0) {
+      this.logger.warn(
+        `${failedLeadNotifications.length}/${leads.length} lead notifications failed for team ${data.teamId}`,
+      );
+    }
+
+    await this.email.sendToGroup('ops', EMAIL_TEMPLATES.TEAM_BUDGET_ALERT, {
+      teamId: data.teamId,
+      threshold: data.threshold,
+      currentCost: data.currentCostUsd.toFixed(2),
+      budgetCap: data.budgetCapUsd.toFixed(2),
+    });
   }
 }
