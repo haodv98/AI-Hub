@@ -166,7 +166,7 @@ export default function Members() {
             <button
               type="button"
               onClick={() => setIsNewMemberModalOpen(true)}
-              className="bg-primary hover:bg-primary-dim text-on-primary px-8 py-4 rounded-xl text-[11px] font-bold uppercase tracking-[0.2em] shadow-lg transition-all active:scale-95 flex items-center gap-2 status-glow"
+              className="w-full md:w-auto bg-primary hover:bg-primary-dim text-on-primary px-8 py-4 rounded-xl text-[11px] font-bold uppercase tracking-[0.2em] shadow-lg transition-all active:scale-95 flex items-center gap-2 status-glow"
             >
               <UserPlus className="w-4 h-4" /> Authorize Entry
             </button>
@@ -220,7 +220,19 @@ export default function Members() {
                   <tr key={member.id} className="group hover:bg-white/5 transition-all cursor-crosshair border-b border-white/5">
                     <td className="px-6 py-6">
                       <div className="flex items-center gap-4">
-                        <div className="w-12 h-12 rounded-xl bg-white/5 border border-white/10 flex items-center justify-center text-xs font-black text-primary">
+                        <img
+                          referrerPolicy="no-referrer"
+                          src={`https://picsum.photos/seed/${member.id}/100/100`}
+                          className="w-12 h-12 rounded-xl object-cover grayscale opacity-60 group-hover:grayscale-0 group-hover:opacity-100 transition-all shadow-xl border border-white/10"
+                          alt=""
+                          onError={(e) => {
+                            const t = e.currentTarget;
+                            t.style.display = 'none';
+                            const fallback = t.nextElementSibling as HTMLElement | null;
+                            if (fallback) fallback.style.display = 'flex';
+                          }}
+                        />
+                        <div className="w-12 h-12 rounded-xl bg-white/5 border border-white/10 items-center justify-center text-xs font-black text-primary hidden">
                           {initials}
                         </div>
                         <div>
@@ -391,6 +403,9 @@ export default function Members() {
           <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
             <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={() => setIsNewMemberModalOpen(false)} className="absolute inset-0 bg-black/80 backdrop-blur-sm" />
             <motion.div initial={{ opacity: 0, scale: 0.95, y: 20 }} animate={{ opacity: 1, scale: 1, y: 0 }} exit={{ opacity: 0, scale: 0.95, y: 20 }} className="relative w-full max-w-xl glass-panel p-8 rounded-3xl border border-white/10 shadow-2xl overflow-hidden">
+              <div className="absolute top-0 right-0 p-8 opacity-5 pointer-events-none">
+                <UserPlus className="w-48 h-48 text-primary" />
+              </div>
               <div className="flex justify-between items-start mb-8">
                 <div className="space-y-1">
                   <h3 className="text-2xl font-black text-on-surface tracking-tighter uppercase">Onboard New <span className="text-primary">Member</span></h3>
@@ -415,7 +430,17 @@ export default function Members() {
                   </div>
                   <div className="space-y-1">
                     <label className="text-[9px] font-black uppercase tracking-[0.3em] text-on-surface-variant ml-1 opacity-60">Protocol Role</label>
-                    <input type="text" placeholder="OPERATOR" className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-xs font-bold uppercase tracking-widest focus:border-primary/40 transition-all" value={newMemberRole} onChange={(event) => setNewMemberRole(event.target.value)} />
+                    <select
+                      className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-xs font-bold uppercase tracking-widest focus:border-primary/40 transition-all appearance-none cursor-pointer"
+                      value={newMemberRole}
+                      onChange={(event) => setNewMemberRole(event.target.value)}
+                    >
+                      <option value="" className="bg-surface">Select Role</option>
+                      <option value="TAC_LEAD" className="bg-surface">TAC_LEAD</option>
+                      <option value="NAV_OFFICER" className="bg-surface">NAV_OFFICER</option>
+                      <option value="DEFENSE" className="bg-surface">DEFENSE</option>
+                      <option value="OPERATOR" className="bg-surface">OPERATOR</option>
+                    </select>
                   </div>
                 </div>
                 <div className="grid grid-cols-2 gap-4">
@@ -444,6 +469,9 @@ export default function Members() {
           <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
             <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={() => setIsImportModalOpen(false)} className="absolute inset-0 bg-black/80 backdrop-blur-sm" />
             <motion.div initial={{ opacity: 0, scale: 0.95, y: 20 }} animate={{ opacity: 1, scale: 1, y: 0 }} exit={{ opacity: 0, scale: 0.95, y: 20 }} className="relative w-full max-w-xl glass-panel p-8 rounded-3xl border border-white/10 shadow-2xl overflow-hidden">
+              <div className="absolute top-0 right-0 p-8 opacity-5 pointer-events-none">
+                <Upload className="w-48 h-48 text-primary" />
+              </div>
               <div className="flex justify-between items-start mb-8">
                 <div className="space-y-1">
                   <h3 className="text-2xl font-black text-on-surface tracking-tighter uppercase">Bulk Member <span className="text-primary">Extraction</span></h3>
@@ -452,7 +480,25 @@ export default function Members() {
                 <button onClick={() => setIsImportModalOpen(false)} className="p-2 hover:bg-white/5 rounded-lg text-on-surface-variant hover:text-white transition-all"><X className="w-5 h-5" /></button>
               </div>
               <div className="space-y-6">
-                <textarea className="w-full bg-white/2 border border-white/10 rounded-2xl p-6 h-64 text-[10px] font-mono text-primary placeholder:text-on-surface-variant/20 focus:border-primary/40 transition-all resize-none shadow-inner" placeholder="email,provider,api_key&#10;dev@company.com,anthropic,sk-ant-xxx" value={csvText} onChange={(event) => setCsvText(event.target.value)} />
+                <div className="space-y-2">
+                  <div className="flex justify-between items-center px-1">
+                    <label className="text-[9px] font-black uppercase tracking-[0.3em] text-on-surface-variant opacity-60">CSV Schema Protocol</label>
+                    <span className="text-[8px] font-mono text-primary uppercase opacity-60">email, role, team, full_name</span>
+                  </div>
+                  <textarea
+                    className="w-full bg-white/2 border border-white/10 rounded-2xl p-6 h-64 text-[10px] font-mono text-primary placeholder:text-on-surface-variant/20 focus:border-primary/40 transition-all resize-none shadow-inner"
+                    placeholder={"sarah.chen@aihub.internal, NAV_OFFICER, Neural-Ops, Sarah Chen\nalex.rivera@aihub.internal, TAC_LEAD, Fleet-Command, Alex Rivera"}
+                    value={csvText}
+                    onChange={(event) => setCsvText(event.target.value)}
+                  />
+                </div>
+                <div className="bg-primary/5 border border-primary/20 rounded-xl p-4 flex gap-4">
+                  <div className="w-1 bg-primary/40 rounded-full flex-shrink-0" />
+                  <p className="text-[9px] font-bold text-on-surface-variant uppercase tracking-widest leading-relaxed">
+                    Personnel data is processed through validation nodes. Incorrect formatting will lead to record rejection.
+                    Ensure all signals match corporate ID standards.
+                  </p>
+                </div>
                 <div className="flex gap-4 pt-2">
                   <button onClick={() => setIsImportModalOpen(false)} className="flex-1 py-4 glass-panel rounded-xl text-[10px] font-black uppercase tracking-[0.3em] hover:bg-white/5 transition-all text-on-surface-variant">Abort Extraction</button>
                   <button onClick={() => importPerSeatKeys.mutate(csvText)} disabled={!csvText.trim() || importPerSeatKeys.isPending} className="flex-1 py-4 bg-primary text-on-primary rounded-xl text-[10px] font-black uppercase tracking-[0.3em] shadow-lg status-glow active:scale-95 transition-all disabled:opacity-50">

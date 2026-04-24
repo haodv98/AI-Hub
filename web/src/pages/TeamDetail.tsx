@@ -1,30 +1,19 @@
+import { useState } from 'react';
 import { Link, useParams } from 'react-router';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { motion, AnimatePresence } from 'motion/react';
 import {
-  AreaChart,
-  Area,
-  XAxis,
-  YAxis,
-  Tooltip,
-  ResponsiveContainer,
-  CartesianGrid,
-} from 'recharts';
-import { StatusBadge } from '@/components/ui/StatusBadge';
-import { StatCard } from '@/components/ui/StatCard';
+  ChevronLeft, Shield, Users, Plus, Trash2, Info,
+  Target, ArrowRightLeft, AlertCircle, CheckCircle2, X,
+} from 'lucide-react';
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 import { TableSkeleton } from '@/components/ui/LoadingSkeleton';
 import { EmptyState, ErrorPanel } from '@/components/ui/RequestState';
 import { useAuth } from '@/contexts/AuthContext';
-import { formatUsd, formatNumber } from '@/lib/utils';
+import { formatUsd } from '@/lib/utils';
 import { canUseCapability } from '@/lib/capabilities';
 import { monthToDateRange } from '@/lib/date-range';
-import {
-  deleteEnvelope,
-  getEnvelope,
-  postEnvelope,
-  putEnvelope,
-} from '@/lib/api';
-import { useState } from 'react';
+import { deleteEnvelope, getEnvelope, postEnvelope, putEnvelope } from '@/lib/api';
 
 interface TeamMember {
   userId: string;
@@ -47,6 +36,43 @@ interface UsageSummaryRow {
   requestCount: number;
 }
 
+interface Policy {
+  id: string;
+  name: string;
+  scope: 'ORG' | 'TEAM' | 'ROLE' | 'USER';
+  target: string;
+  priority: number;
+  active: boolean;
+  allowedModels: string[];
+  limits: { rpm: number; dailyTokens: number; monthlyBudget: number };
+  fallback: { enabled: boolean; threshold: number; fromModel: string; toModel: string };
+}
+
+const mockPolicies: Policy[] = [
+  {
+    id: '1',
+    name: 'Standard Operator Quota',
+    scope: 'ROLE',
+    target: 'OPERATOR',
+    priority: 10,
+    active: true,
+    allowedModels: ['GPT-4o', 'Claude-3.5-Sonnet'],
+    limits: { rpm: 60, dailyTokens: 250000, monthlyBudget: 500 },
+    fallback: { enabled: true, threshold: 85, fromModel: 'GPT-4o', toModel: 'GPT-3.5-Turbo' },
+  },
+  {
+    id: '2',
+    name: 'Neural-Ops Unrestricted',
+    scope: 'TEAM',
+    target: 'Neural-Ops',
+    priority: 50,
+    active: true,
+    allowedModels: ['GPT-4o', 'Claude-3.5-Opus', 'o1-preview'],
+    limits: { rpm: 300, dailyTokens: 5000000, monthlyBudget: 2500 },
+    fallback: { enabled: false, threshold: 90, fromModel: '', toModel: '' },
+  },
+];
+
 function useTeamDetail(id: string) {
   return useQuery<TeamDetail>({
     queryKey: ['teams', id],
@@ -64,28 +90,6 @@ function useTeamUsage(id: string) {
   });
 }
 
-interface SpendTooltipPayload {
-  value: number;
-}
-
-function SpendTooltip({
-  active,
-  payload,
-  label,
-}: {
-  active?: boolean;
-  payload?: SpendTooltipPayload[];
-  label?: string;
-}) {
-  if (!active || !payload?.length) return null;
-  return (
-    <div className="rounded-lg border border-border bg-background px-3 py-2 text-xs shadow">
-      <p className="font-medium mb-1">{label}</p>
-      <p className="text-muted-foreground">{formatUsd(payload[0].value)}</p>
-    </div>
-  );
-}
-
 export default function TeamDetail() {
   const { id } = useParams<{ id: string }>();
   const qc = useQueryClient();
@@ -95,89 +99,57 @@ export default function TeamDetail() {
   const usageQuery = useTeamUsage(id!);
   const team = teamQuery.data;
   const usageRows = usageQuery.data;
+
   const [removeTarget, setRemoveTarget] = useState<string | null>(null);
   const [newMemberId, setNewMemberId] = useState('');
   const [newMemberTier, setNewMemberTier] = useState<'MEMBER' | 'SENIOR' | 'LEAD'>('MEMBER');
   const [budgetInput, setBudgetInput] = useState('');
   const [tierTarget, setTierTarget] = useState<{ userId: string; tier: 'MEMBER' | 'SENIOR' | 'LEAD' } | null>(null);
   const [mutationError, setMutationError] = useState<string | null>(null);
+  const [attachedPolicies, setAttachedPolicies] = useState<Policy[]>([mockPolicies[0]]);
+  const [isAttachModalOpen, setIsAttachModalOpen] = useState(false);
 
   const removeMember = useMutation({
     mutationFn: (userId: string) => deleteEnvelope(`/teams/${id}/members/${userId}`),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['teams', id] });
-      setRemoveTarget(null);
-      setMutationError(null);
-    },
-    onError: (error) => {
-      setMutationError(error instanceof Error ? error.message : 'Failed to remove member.');
-    },
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['teams', id] }); setRemoveTarget(null); setMutationError(null); },
+    onError: (error) => { setMutationError(error instanceof Error ? error.message : 'Failed to remove member.'); },
   });
 
   const addMember = useMutation({
-    mutationFn: () =>
-      postEnvelope(`/teams/${id}/members`, {
-        userId: newMemberId.trim(),
-        tier: newMemberTier,
-      }),
-    onSuccess: () => {
-      setNewMemberId('');
-      qc.invalidateQueries({ queryKey: ['teams', id] });
-      setMutationError(null);
-    },
-    onError: (error) => {
-      setMutationError(error instanceof Error ? error.message : 'Failed to add member.');
-    },
+    mutationFn: () => postEnvelope(`/teams/${id}/members`, { userId: newMemberId.trim(), tier: newMemberTier }),
+    onSuccess: () => { setNewMemberId(''); qc.invalidateQueries({ queryKey: ['teams', id] }); setMutationError(null); },
+    onError: (error) => { setMutationError(error instanceof Error ? error.message : 'Failed to add member.'); },
   });
 
   const updateBudget = useMutation({
-    mutationFn: () =>
-      putEnvelope(`/teams/${id}`, {
-        monthlyBudgetUsd: Number(budgetInput),
-      }),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['teams', id] });
-      setBudgetInput('');
-      setMutationError(null);
-    },
-    onError: (error) => {
-      setMutationError(error instanceof Error ? error.message : 'Failed to update budget.');
-    },
+    mutationFn: () => putEnvelope(`/teams/${id}`, { monthlyBudgetUsd: Number(budgetInput) }),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['teams', id] }); setBudgetInput(''); setMutationError(null); },
+    onError: (error) => { setMutationError(error instanceof Error ? error.message : 'Failed to update budget.'); },
   });
 
   const changeTier = useMutation({
     mutationFn: ({ userId, tier }: { userId: string; tier: 'MEMBER' | 'SENIOR' | 'LEAD' }) =>
       putEnvelope(`/teams/${id}/members/${userId}/tier`, { tier }),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['teams', id] });
-      setTierTarget(null);
-      setMutationError(null);
-    },
-    onError: (error) => {
-      setMutationError(error instanceof Error ? error.message : 'Failed to change member tier.');
-    },
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['teams', id] }); setTierTarget(null); setMutationError(null); },
+    onError: (error) => { setMutationError(error instanceof Error ? error.message : 'Failed to change member tier.'); },
   });
 
   const totalCost = (usageRows ?? []).reduce((sum, r) => sum + r.costUsd, 0);
-  const totalTokens = (usageRows ?? []).reduce((sum, r) => sum + r.totalTokens, 0);
-  const totalRequests = (usageRows ?? []).reduce((sum, r) => sum + r.requestCount, 0);
 
-  const chartData = (usageRows ?? []).map((r) => ({
-    ...r,
-    label: new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric' }).format(
-      new Date(r.date),
-    ),
-  }));
+  const effectivePolicy = attachedPolicies.length > 0
+    ? attachedPolicies.reduce((prev, current) => (prev.priority > current.priority ? prev : current))
+    : null;
+
+  const handleDetach = (policyId: string) => setAttachedPolicies(attachedPolicies.filter((p) => p.id !== policyId));
+  const handleAttach = (policy: Policy) => {
+    if (!attachedPolicies.find((p) => p.id === policy.id)) setAttachedPolicies([...attachedPolicies, policy]);
+    setIsAttachModalOpen(false);
+  };
 
   if (teamQuery.isLoading) {
     return (
       <div className="p-8">
         <div className="h-8 w-48 bg-muted animate-pulse rounded mb-6" />
-        <div className="grid grid-cols-3 gap-4 mb-8">
-          {[1, 2, 3].map((i) => (
-            <div key={i} className="h-28 rounded-xl border border-border bg-muted animate-pulse" />
-          ))}
-        </div>
         <TableSkeleton rows={5} cols={4} />
       </div>
     );
@@ -186,202 +158,390 @@ export default function TeamDetail() {
   if (!team) return null;
 
   return (
-    <div className="p-8">
-      <div className="mb-6">
-        <Link to="/teams" className="text-sm text-muted-foreground hover:text-foreground mb-2 inline-flex items-center gap-1">
-          ← Teams
+    <div className="space-y-8 pb-20">
+      <div className="flex items-center justify-between">
+        <Link
+          to="/teams"
+          className="flex items-center gap-2 text-[10px] font-black uppercase tracking-[0.2em] text-on-surface-variant hover:text-primary transition-all group"
+        >
+          <ChevronLeft className="w-4 h-4 group-hover:-translate-x-1 transition-transform" /> Return to Manifest
         </Link>
-        <h1 className="text-2xl font-bold tracking-tight">{team.name}</h1>
-        {team.description && (
-          <p className="text-sm text-muted-foreground mt-1">{team.description}</p>
-        )}
-      </div>
-
-      <div className="grid grid-cols-3 gap-4 mb-8">
-        <StatCard label="Spend (30d)" value={formatUsd(totalCost)} />
-        <StatCard label="Requests (30d)" value={formatNumber(totalRequests)} />
-        <StatCard label="Tokens (30d)" value={formatNumber(totalTokens)} />
+        <div className="flex items-center gap-3">
+          <span className="text-[10px] font-black uppercase tracking-widest text-on-surface-variant opacity-40 italic">Audit Node // Signal-42</span>
+          <div className="w-8 h-px bg-white/10" />
+        </div>
       </div>
 
       {(teamQuery.isError || usageQuery.isError) && (
-        <ErrorPanel
-          message="Failed to load team data."
-          onRetry={() => {
-            teamQuery.refetch();
-            usageQuery.refetch();
-          }}
-        />
+        <ErrorPanel message="Failed to load team data." onRetry={() => { teamQuery.refetch(); usageQuery.refetch(); }} />
       )}
       {mutationError && <ErrorPanel message={mutationError} onRetry={() => setMutationError(null)} />}
 
-      {canUseCapability(role, 'teams.addMember') && (
-        <div className="rounded-xl border border-border p-4 mb-8">
-          <h2 className="text-sm font-semibold mb-3">Add member</h2>
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-            <input
-              value={newMemberId}
-              onChange={(event) => setNewMemberId(event.target.value)}
-              placeholder="User ID"
-              className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm"
-            />
-            <select
-              value={newMemberTier}
-              onChange={(event) => setNewMemberTier(event.target.value as 'MEMBER' | 'SENIOR' | 'LEAD')}
-              className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm"
-            >
-              <option value="MEMBER">MEMBER</option>
-              <option value="SENIOR">SENIOR</option>
-              <option value="LEAD">LEAD</option>
-            </select>
-            <button
-              type="button"
-              onClick={() => addMember.mutate()}
-              disabled={!newMemberId.trim() || addMember.isPending}
-              className="rounded-md bg-primary px-3 py-2 text-sm font-medium text-primary-foreground disabled:opacity-50"
-            >
-              {addMember.isPending ? 'Adding…' : 'Add'}
-            </button>
-          </div>
-        </div>
-      )}
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
+        <div className="lg:col-span-8 space-y-8">
 
-      {canUseCapability(role, 'teams.updateBudget') && (
-        <div className="rounded-xl border border-border p-4 mb-8">
-          <h2 className="text-sm font-semibold mb-3">Update monthly budget</h2>
-          <div className="flex flex-col md:flex-row gap-3">
-            <input
-              type="number"
-              min={0}
-              step={1}
-              placeholder="USD amount"
-              value={budgetInput}
-              onChange={(event) => setBudgetInput(event.target.value)}
-              className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm"
-            />
-            <button
-              type="button"
-              onClick={() => updateBudget.mutate()}
-              disabled={!budgetInput || updateBudget.isPending}
-              className="rounded-md bg-primary px-3 py-2 text-sm font-medium text-primary-foreground disabled:opacity-50"
-            >
-              {updateBudget.isPending ? 'Saving…' : 'Save budget'}
-            </button>
+          {/* Header Card */}
+          <div className="glass-panel p-8 rounded-3xl border border-white/10 relative overflow-hidden">
+            <div className="absolute top-0 right-0 p-8 opacity-5 pointer-events-none">
+              <Users className="w-48 h-48 text-primary" />
+            </div>
+            <div className="relative z-10">
+              <div className="flex gap-6 items-center mb-6">
+                <div className="w-16 h-16 rounded-2xl bg-surface border border-white/10 flex items-center justify-center font-black text-2xl text-primary status-glow">
+                  {team.name[0].toUpperCase()}
+                </div>
+                <div>
+                  <h2 className="text-4xl font-black text-on-surface tracking-tighter uppercase">{team.name}</h2>
+                  <p className="text-[10px] font-mono text-primary uppercase tracking-[0.3em] mt-1 italic">
+                    Unit ID: {team.id}
+                  </p>
+                </div>
+              </div>
+              <div className="grid grid-cols-3 gap-1 px-1">
+                <div className="space-y-1">
+                  <p className="text-[8px] font-black uppercase tracking-widest text-on-surface-variant opacity-40">Resolved Policy</p>
+                  <p className="text-xs font-bold text-on-surface truncate uppercase tracking-tight">{effectivePolicy?.name || 'NONE'}</p>
+                </div>
+                <div className="space-y-1 border-l border-white/10 pl-6">
+                  <p className="text-[8px] font-black uppercase tracking-widest text-on-surface-variant opacity-40">Status</p>
+                  <div className="flex items-center gap-2">
+                    <div className="w-1.5 h-1.5 rounded-full bg-primary status-glow" />
+                    <p className="text-xs font-bold text-on-surface uppercase tracking-tight">Active Reach</p>
+                  </div>
+                </div>
+                <div className="space-y-1 border-l border-white/10 pl-6 text-right">
+                  <p className="text-[8px] font-black uppercase tracking-widest text-on-surface-variant opacity-40">Monthly Spend</p>
+                  <p className="text-xs font-mono font-bold text-primary">{formatUsd(totalCost)}</p>
+                </div>
+              </div>
+            </div>
           </div>
-        </div>
-      )}
 
-      {/* Daily spend chart */}
-      <div className="rounded-xl border border-border p-5 mb-8">
-        <h2 className="text-sm font-semibold mb-4">Daily spend (last 30 days)</h2>
-        {usageQuery.isLoading ? (
-          <div className="h-48 bg-muted animate-pulse rounded-lg" />
-        ) : chartData.length === 0 ? (
-          <div className="h-48 flex items-center justify-center text-sm text-muted-foreground">
-            No usage data in this period
-          </div>
-        ) : (
-          <ResponsiveContainer width="100%" height={192}>
-            <AreaChart data={chartData} margin={{ top: 4, right: 4, left: 0, bottom: 0 }}>
-              <defs>
-                <linearGradient id="teamSpendGrad" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="5%" stopColor="hsl(var(--primary))" stopOpacity={0.25} />
-                  <stop offset="95%" stopColor="hsl(var(--primary))" stopOpacity={0} />
-                </linearGradient>
-              </defs>
-              <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" vertical={false} />
-              <XAxis
-                dataKey="label"
-                tick={{ fontSize: 11, fill: 'hsl(var(--muted-foreground))' }}
-                tickLine={false}
-                axisLine={false}
-                interval="preserveStartEnd"
-              />
-              <YAxis
-                tick={{ fontSize: 11, fill: 'hsl(var(--muted-foreground))' }}
-                tickLine={false}
-                axisLine={false}
-                tickFormatter={(v) => `$${v}`}
-                width={48}
-              />
-              <Tooltip content={<SpendTooltip />} />
-              <Area
-                type="monotone"
-                dataKey="costUsd"
-                stroke="hsl(var(--primary))"
-                strokeWidth={2}
-                fill="url(#teamSpendGrad)"
-                dot={false}
-              />
-            </AreaChart>
-          </ResponsiveContainer>
-        )}
-      </div>
-
-      {/* Members table */}
-      <div>
-        <h2 className="text-base font-semibold mb-3">
-          Members ({team.members.length})
-        </h2>
-        <div className="rounded-xl border border-border overflow-hidden">
-          <table className="w-full text-sm">
-            <thead className="border-b border-border bg-muted/40">
-              <tr>
-                <th className="px-4 py-3 text-left font-medium text-muted-foreground">Name</th>
-                <th className="px-4 py-3 text-left font-medium text-muted-foreground">Tier</th>
-                <th className="px-4 py-3 text-left font-medium text-muted-foreground">Status</th>
-                <th className="px-4 py-3 text-left font-medium text-muted-foreground">Actions</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-border">
-              {team.members.map((m) => (
-                <tr key={m.userId} className="hover:bg-muted/20 transition-colors">
-                  <td className="px-4 py-3">
-                    <p className="font-medium">{m.user.fullName}</p>
-                    <p className="text-xs text-muted-foreground">{m.user.email}</p>
-                  </td>
-                  <td className="px-4 py-3">
-                    <span className="inline-flex items-center rounded px-2 py-0.5 text-xs font-medium bg-muted text-muted-foreground capitalize">
-                      {m.tier.toLowerCase()}
-                    </span>
-                  </td>
-                  <td className="px-4 py-3">
-                    <StatusBadge status={m.user.status} />
-                  </td>
-                  <td className="px-4 py-3">
-                    <div className="flex items-center gap-3">
-                      {canUseCapability(role, 'teams.changeTier') && (
-                        <button
-                          type="button"
-                          onClick={() => setTierTarget({ userId: m.userId, tier: m.tier as 'MEMBER' | 'SENIOR' | 'LEAD' })}
-                          className="text-xs text-primary hover:underline"
-                        >
-                          Change tier
-                        </button>
-                      )}
-                      {canUseCapability(role, 'teams.removeMember') && (
-                        <button
-                          onClick={() => setRemoveTarget(m.userId)}
-                          className="text-xs text-rose-600 hover:text-rose-800"
-                        >
-                          Remove
-                        </button>
-                      )}
+          {/* Effective Protocol Analysis */}
+          <div className="glass-panel p-1 border-primary/20 rounded-3xl bg-primary/5 overflow-hidden shadow-[0_0_20px_rgba(56,189,248,0.05)]">
+            <div className="p-8 space-y-8">
+              <div className="flex justify-between items-center">
+                <div className="flex items-center gap-3">
+                  <Shield className="w-6 h-6 text-primary" />
+                  <h3 className="text-xl font-black uppercase tracking-tight">Effective Protocol Analysis</h3>
+                </div>
+                <div className="px-3 py-1 bg-primary text-on-primary rounded font-black text-[9px] uppercase tracking-widest shadow-lg">
+                  FINAL RESOLUTION
+                </div>
+              </div>
+              {effectivePolicy ? (
+                <div className="space-y-8">
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+                    <div className="space-y-4">
+                      <p className="text-[9px] font-black uppercase tracking-[0.3em] text-on-surface-variant ml-1 opacity-60">Authorized Engines</p>
+                      <div className="flex flex-wrap gap-2">
+                        {effectivePolicy.allowedModels.map((m, i) => (
+                          <div key={i} className="px-4 py-2 bg-white/5 border border-white/10 rounded-xl flex items-center gap-2">
+                            <div className="w-1.5 h-1.5 rounded-full bg-primary" />
+                            <span className="text-[10px] font-bold uppercase tracking-widest text-on-surface">{m}</span>
+                          </div>
+                        ))}
+                      </div>
                     </div>
-                  </td>
-                </tr>
-              ))}
-              {team.members.length === 0 && (
-                <tr>
-                  <td colSpan={4} className="px-4 py-10">
-                    <EmptyState message="No members in this team" />
-                  </td>
-                </tr>
+                    <div className="space-y-4">
+                      <p className="text-[9px] font-black uppercase tracking-[0.3em] text-on-surface-variant ml-1 opacity-60">Resource Limitations</p>
+                      <div className="grid grid-cols-1 gap-2 font-mono">
+                        <div className="flex justify-between items-center p-3 bg-white/5 rounded-xl border border-white/5">
+                          <span className="text-[9px] uppercase tracking-widest text-on-surface-variant">Signal Rate</span>
+                          <span className="text-xs font-bold text-primary">{effectivePolicy.limits.rpm} RPM</span>
+                        </div>
+                        <div className="flex justify-between items-center p-3 bg-white/5 rounded-xl border border-white/5">
+                          <span className="text-[9px] uppercase tracking-widest text-on-surface-variant">Daily Energy</span>
+                          <span className="text-xs font-bold text-primary">{effectivePolicy.limits.dailyTokens.toLocaleString()} TOKENS</span>
+                        </div>
+                        <div className="flex justify-between items-center p-3 bg-white/5 rounded-xl border border-white/5">
+                          <span className="text-[9px] uppercase tracking-widest text-on-surface-variant">Finance Cap</span>
+                          <span className="text-xs font-bold text-primary">${effectivePolicy.limits.monthlyBudget.toLocaleString()}</span>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                  <div className="pt-6 border-t border-white/10">
+                    <p className="text-[9px] font-black uppercase tracking-[0.3em] text-on-surface-variant ml-1 opacity-60 mb-4">Failover Intelligence</p>
+                    <div className="glass-panel p-6 rounded-2xl flex items-center justify-between border-dashed">
+                      <div className="flex items-center gap-6">
+                        <div className="text-center">
+                          <p className="text-[8px] font-black text-on-surface-variant uppercase tracking-widest mb-1 opacity-40">Anchor</p>
+                          <p className="text-[10px] font-bold uppercase text-on-surface">{effectivePolicy.fallback.fromModel || 'NONE'}</p>
+                        </div>
+                        <ArrowRightLeft className="w-4 h-4 text-primary opacity-30" />
+                        <div className="text-center">
+                          <p className="text-[8px] font-black text-on-surface-variant uppercase tracking-widest mb-1 opacity-40">Failover</p>
+                          <p className="text-[10px] font-bold uppercase text-primary">{effectivePolicy.fallback.toModel || 'NONE'}</p>
+                        </div>
+                      </div>
+                      <div className="text-right">
+                        <p className="text-[8px] font-black text-on-surface-variant uppercase tracking-widest mb-1 opacity-40">Threshold</p>
+                        <p className="text-[10px] font-mono font-bold text-on-surface">{effectivePolicy.fallback.threshold}% UTIL</p>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              ) : (
+                <div className="p-12 text-center text-on-surface-variant opacity-40">
+                  <AlertCircle className="w-12 h-12 mx-auto mb-4" />
+                  <p className="text-[10px] font-black uppercase tracking-[0.3em]">No protocols actively bound to this signal</p>
+                </div>
               )}
-            </tbody>
-          </table>
+            </div>
+          </div>
+
+          {/* Team Member Manifest */}
+          <div className="glass-panel p-8 rounded-3xl border border-white/10 space-y-8">
+            <div className="flex justify-between items-center">
+              <div className="flex items-center gap-3">
+                <Users className="w-6 h-6 text-primary" />
+                <h3 className="text-xl font-black uppercase tracking-tight">Team Member Manifest</h3>
+              </div>
+              <div className="text-[10px] font-black text-on-surface-variant uppercase tracking-[0.2em] opacity-40">
+                Personnel Inventory // Count: {team.members.length}
+              </div>
+            </div>
+            <div className="overflow-x-auto">
+              <table className="w-full text-left">
+                <thead>
+                  <tr className="text-[10px] font-black text-on-surface-variant uppercase tracking-[0.3em] opacity-40 border-b border-white/5">
+                    <th className="pb-4">Member_Signal</th>
+                    <th className="pb-4">Tier</th>
+                    <th className="pb-4">Status</th>
+                    <th className="pb-4 text-right">Actions</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-white/5">
+                  {team.members.map((m) => (
+                    <tr key={m.userId} className="group hover:bg-white/5 transition-all">
+                      <td className="py-5">
+                        <p className="text-xs font-black text-on-surface uppercase tracking-tight">{m.user.fullName}</p>
+                        <p className="text-[8px] font-mono text-primary uppercase mt-0.5 opacity-60">{m.user.email}</p>
+                      </td>
+                      <td className="py-5">
+                        <span className="text-[10px] font-bold text-on-surface uppercase tracking-widest">{m.tier}</span>
+                      </td>
+                      <td className="py-5">
+                        <div className="flex items-center gap-2">
+                          <div className={`w-1.5 h-1.5 rounded-full ${m.user.status === 'ACTIVE' ? 'bg-primary animate-pulse' : 'bg-on-surface-variant/40'}`} />
+                          <span className={`text-[10px] font-black uppercase tracking-widest ${m.user.status === 'ACTIVE' ? 'text-primary' : 'text-on-surface-variant/40'}`}>
+                            {m.user.status}
+                          </span>
+                        </div>
+                      </td>
+                      <td className="py-5 text-right">
+                        <div className="flex justify-end gap-2 opacity-0 group-hover:opacity-100 transition-all">
+                          {canUseCapability(role, 'teams.changeTier') && (
+                            <button
+                              type="button"
+                              onClick={() => setTierTarget({ userId: m.userId, tier: m.tier as 'MEMBER' | 'SENIOR' | 'LEAD' })}
+                              className="px-3 py-1.5 bg-white/5 hover:bg-primary/20 text-on-surface-variant hover:text-primary rounded-xl transition-all text-[9px] font-black uppercase tracking-widest"
+                            >
+                              Tier
+                            </button>
+                          )}
+                          {canUseCapability(role, 'teams.removeMember') && (
+                            <button
+                              type="button"
+                              onClick={() => setRemoveTarget(m.userId)}
+                              className="p-1.5 bg-white/5 hover:bg-error/20 text-on-surface-variant hover:text-error rounded-xl transition-all"
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                          )}
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                  {team.members.length === 0 && (
+                    <tr>
+                      <td colSpan={4} className="py-10">
+                        <EmptyState message="No members in this team" />
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+            {canUseCapability(role, 'teams.addMember') && (
+              <div className="pt-6 border-t border-white/10">
+                <p className="text-[9px] font-black uppercase tracking-[0.3em] text-on-surface-variant opacity-50 mb-4">Recruit Personnel</p>
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                  <input
+                    value={newMemberId}
+                    onChange={(e) => setNewMemberId(e.target.value)}
+                    placeholder="User ID"
+                    className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-xs font-bold uppercase tracking-widest focus:border-primary/40 focus:ring-0 transition-all"
+                  />
+                  <select
+                    value={newMemberTier}
+                    onChange={(e) => setNewMemberTier(e.target.value as 'MEMBER' | 'SENIOR' | 'LEAD')}
+                    className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-xs font-bold uppercase tracking-widest focus:border-primary/40 focus:ring-0 transition-all appearance-none"
+                  >
+                    <option value="MEMBER" className="bg-surface">MEMBER</option>
+                    <option value="SENIOR" className="bg-surface">SENIOR</option>
+                    <option value="LEAD" className="bg-surface">LEAD</option>
+                  </select>
+                  <button
+                    type="button"
+                    onClick={() => addMember.mutate()}
+                    disabled={!newMemberId.trim() || addMember.isPending}
+                    className="py-3 bg-primary text-on-primary font-black text-[11px] uppercase tracking-[0.3em] rounded-xl shadow-lg hover:brightness-110 active:scale-[0.98] transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    {addMember.isPending ? 'Recruiting...' : 'Recruit Personnel'}
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+
+        <div className="lg:col-span-4 space-y-8">
+          {/* Bound Protocols */}
+          <div className="glass-panel p-8 rounded-3xl space-y-8">
+            <div className="flex justify-between items-center">
+              <h3 className="text-xl font-black uppercase tracking-tight">Bound Protocols</h3>
+              <button
+                onClick={() => setIsAttachModalOpen(true)}
+                className="p-2 bg-primary/10 hover:bg-primary/20 text-primary rounded-xl transition-all shadow-sm"
+              >
+                <Plus className="w-4 h-4" />
+              </button>
+            </div>
+            <div className="space-y-3">
+              {attachedPolicies.map((p) => (
+                <div key={p.id} className="group p-4 bg-white/5 border border-white/10 rounded-2xl hover:border-primary/40 transition-all">
+                  <div className="flex justify-between items-start mb-2">
+                    <div>
+                      <p className="text-[10px] font-black text-on-surface uppercase tracking-tight">{p.name}</p>
+                      <p className="text-[8px] font-mono text-primary uppercase mt-0.5 opacity-60">PRIORITY: {p.priority}</p>
+                    </div>
+                    <button onClick={() => handleDetach(p.id)} className="p-1.5 text-on-surface-variant hover:text-error transition-all">
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                  <div className="flex items-center justify-between mt-3 pt-3 border-t border-white/5">
+                    <div className="flex items-center gap-2">
+                      <Target className="w-3 h-3 text-on-surface-variant opacity-40" />
+                      <span className="text-[8px] font-black text-on-surface-variant uppercase tracking-widest opacity-60">{p.scope}: {p.target}</span>
+                    </div>
+                    <button
+                      onClick={() => handleDetach(p.id)}
+                      className="text-[8px] font-black uppercase tracking-widest text-error opacity-0 group-hover:opacity-100 transition-all hover:underline"
+                    >
+                      DETACH
+                    </button>
+                  </div>
+                </div>
+              ))}
+              {attachedPolicies.length === 0 && (
+                <p className="text-[9px] font-black uppercase tracking-widest text-on-surface-variant opacity-40 text-center py-4">
+                  No bound protocols identified
+                </p>
+              )}
+            </div>
+            <div className="p-4 bg-primary/5 border border-primary/20 rounded-2xl flex gap-3">
+              <Info className="text-primary w-4 h-4 flex-shrink-0 mt-0.5" />
+              <p className="text-[9px] font-bold text-on-surface-variant uppercase tracking-widest leading-relaxed">
+                Multi-policy environment. The directive with the{' '}
+                <span className="text-primary">highest priority integer</span> overrides sub-policies.
+              </p>
+            </div>
+          </div>
+
+          {/* Budget Control */}
+          {canUseCapability(role, 'teams.updateBudget') && (
+            <div className="glass-panel p-8 rounded-3xl space-y-6">
+              <h3 className="text-xl font-black uppercase tracking-tight">Budget Control</h3>
+              <div className="space-y-2">
+                <p className="text-[9px] font-black uppercase tracking-[0.3em] text-on-surface-variant opacity-60">Monthly Cap</p>
+                <p className="text-2xl font-black text-primary font-mono">{formatUsd(team.monthlyBudgetUsd ?? 0)}</p>
+              </div>
+              <div className="flex gap-2">
+                <input
+                  type="number"
+                  min={0}
+                  step={1}
+                  placeholder="USD amount"
+                  value={budgetInput}
+                  onChange={(e) => setBudgetInput(e.target.value)}
+                  className="flex-1 bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-xs font-bold focus:border-primary/40 focus:ring-0 transition-all"
+                />
+                <button
+                  type="button"
+                  onClick={() => updateBudget.mutate()}
+                  disabled={!budgetInput || updateBudget.isPending}
+                  className="px-4 py-3 bg-primary text-on-primary font-black text-[10px] uppercase tracking-widest rounded-xl disabled:opacity-50 hover:brightness-110 active:scale-95 transition-all"
+                >
+                  {updateBudget.isPending ? '...' : 'Set'}
+                </button>
+              </div>
+            </div>
+          )}
         </div>
       </div>
 
+      {/* Attach Protocol Modal */}
+      <AnimatePresence>
+        {isAttachModalOpen && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+            <motion.div
+              initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+              onClick={() => setIsAttachModalOpen(false)}
+              className="absolute inset-0 bg-black/80 backdrop-blur-sm"
+            />
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 20 }}
+              className="relative w-full max-w-lg glass-panel p-8 rounded-3xl border border-white/10 shadow-2xl overflow-hidden"
+            >
+              <div className="absolute top-0 right-0 p-8 opacity-5 pointer-events-none">
+                <Target className="w-48 h-48 text-primary" />
+              </div>
+              <div className="flex justify-between items-start mb-8">
+                <div className="space-y-1">
+                  <h3 className="text-2xl font-black text-on-surface tracking-tighter uppercase">
+                    Attach Protocol <span className="text-primary">Node</span>
+                  </h3>
+                  <p className="text-[10px] font-bold text-on-surface-variant uppercase tracking-[0.2em] opacity-40">
+                    Select existing protocol manifest to bind
+                  </p>
+                </div>
+                <button onClick={() => setIsAttachModalOpen(false)} className="p-2 hover:bg-white/5 rounded-lg text-on-surface-variant hover:text-white transition-all">
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+              <div className="space-y-3 max-h-96 overflow-y-auto pr-2">
+                {mockPolicies.map((p) => (
+                  <button
+                    key={p.id}
+                    onClick={() => handleAttach(p)}
+                    disabled={!!attachedPolicies.find((a) => a.id === p.id)}
+                    className={`w-full p-4 glass-panel rounded-2xl flex items-center justify-between border-transparent transition-all group relative ${
+                      attachedPolicies.find((a) => a.id === p.id)
+                        ? 'opacity-40 grayscale cursor-not-allowed'
+                        : 'hover:border-primary/40 hover:bg-white/5'
+                    }`}
+                  >
+                    <div className="text-left">
+                      <p className="text-[10px] font-black text-on-surface uppercase tracking-tight">{p.name}</p>
+                      <p className="text-[8px] font-mono text-primary uppercase mt-0.5 opacity-60">SCOPE: {p.scope} // PRIORITY: {p.priority}</p>
+                    </div>
+                    {attachedPolicies.find((a) => a.id === p.id)
+                      ? <CheckCircle2 className="w-4 h-4 text-primary" />
+                      : <Plus className="w-4 h-4 text-on-surface-variant group-hover:text-primary transition-colors" />
+                    }
+                  </button>
+                ))}
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* Remove member confirm */}
       <ConfirmDialog
         open={removeTarget !== null}
         title="Remove member"
@@ -392,35 +552,52 @@ export default function TeamDetail() {
         onCancel={() => setRemoveTarget(null)}
       />
 
-      {tierTarget && (
-        <div role="dialog" aria-modal="true" className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
-          <div className="w-full max-w-sm rounded-xl border border-border bg-background p-6 shadow-xl">
-            <h2 className="text-base font-semibold mb-4">Change member tier</h2>
-            <select
-              value={tierTarget.tier}
-              onChange={(event) => setTierTarget({ ...tierTarget, tier: event.target.value as 'MEMBER' | 'SENIOR' | 'LEAD' })}
-              className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm mb-5"
+      {/* Change tier modal */}
+      <AnimatePresence>
+        {tierTarget && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+            <motion.div
+              initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+              onClick={() => setTierTarget(null)}
+              className="absolute inset-0 bg-black/80 backdrop-blur-sm"
+            />
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 20 }}
+              className="relative w-full max-w-sm glass-panel p-8 rounded-3xl border border-white/10 shadow-2xl"
             >
-              <option value="MEMBER">MEMBER</option>
-              <option value="SENIOR">SENIOR</option>
-              <option value="LEAD">LEAD</option>
-            </select>
-            <div className="flex justify-end gap-3">
-              <button type="button" onClick={() => setTierTarget(null)} className="px-4 py-2 text-sm rounded-md border border-border">
-                Cancel
-              </button>
-              <button
-                type="button"
-                onClick={() => changeTier.mutate(tierTarget)}
-                disabled={changeTier.isPending}
-                className="px-4 py-2 text-sm font-medium bg-primary text-primary-foreground rounded-md disabled:opacity-50"
+              <h2 className="text-xl font-black uppercase tracking-tight mb-6">Change Member Tier</h2>
+              <select
+                value={tierTarget.tier}
+                onChange={(e) => setTierTarget({ ...tierTarget, tier: e.target.value as 'MEMBER' | 'SENIOR' | 'LEAD' })}
+                className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-xs font-bold uppercase tracking-widest focus:border-primary/40 focus:ring-0 transition-all appearance-none mb-6"
               >
-                {changeTier.isPending ? 'Saving…' : 'Save'}
-              </button>
-            </div>
+                <option value="MEMBER" className="bg-surface">MEMBER</option>
+                <option value="SENIOR" className="bg-surface">SENIOR</option>
+                <option value="LEAD" className="bg-surface">LEAD</option>
+              </select>
+              <div className="flex gap-3 justify-end">
+                <button
+                  type="button"
+                  onClick={() => setTierTarget(null)}
+                  className="px-5 py-2.5 bg-white/5 border border-white/10 text-on-surface-variant font-black text-[10px] uppercase tracking-widest rounded-xl hover:bg-white/10 transition-all"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={() => changeTier.mutate(tierTarget)}
+                  disabled={changeTier.isPending}
+                  className="px-5 py-2.5 bg-primary text-on-primary font-black text-[10px] uppercase tracking-widest rounded-xl hover:brightness-110 transition-all disabled:opacity-50"
+                >
+                  {changeTier.isPending ? 'Saving...' : 'Save Tier'}
+                </button>
+              </div>
+            </motion.div>
           </div>
-        </div>
-      )}
+        )}
+      </AnimatePresence>
     </div>
   );
 }

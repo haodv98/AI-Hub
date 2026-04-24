@@ -285,23 +285,28 @@ export class KeysService {
 
   @Cron(CronExpression.EVERY_30_MINUTES)
   async revokeExpiredRotatingKeys(): Promise<void> {
-    const cutoff = new Date(Date.now() - GRACE_PERIOD_HOURS * 60 * 60 * 1000);
-    const staleKeys = await this.prisma.apiKey.findMany({
-      where: {
-        status: ApiKeyStatus.ROTATING,
-        rotatedAt: { lte: cutoff },
-      },
-      select: { id: true },
-      take: 500,
-    });
+    try {
+      const cutoff = new Date(Date.now() - GRACE_PERIOD_HOURS * 60 * 60 * 1000);
+      const staleKeys = await this.prisma.apiKey.findMany({
+        where: {
+          status: ApiKeyStatus.ROTATING,
+          rotatedAt: { lte: cutoff },
+        },
+        select: { id: true },
+        take: 500,
+      });
 
-    for (const key of staleKeys) {
-      try {
-        await this.revokeKey(key.id, 'system');
-      } catch (err: unknown) {
-        const message = err instanceof Error ? err.message : String(err);
-        this.logger.warn(`Failed to revoke expired rotating key ${key.id}: ${message}`);
+      for (const key of staleKeys) {
+        try {
+          await this.revokeKey(key.id, 'system');
+        } catch (err: unknown) {
+          const message = err instanceof Error ? err.message : String(err);
+          this.logger.warn(`Failed to revoke expired rotating key ${key.id}: ${message}`);
+        }
       }
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
+      this.logger.warn(`revokeExpiredRotatingKeys skipped — DB unavailable: ${message}`);
     }
   }
 }

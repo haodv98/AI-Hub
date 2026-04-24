@@ -2,13 +2,19 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { motion, AnimatePresence } from 'motion/react';
-import { Activity, ArrowRightLeft, CheckCircle2, ChevronLeft, Database, Edit2, Info, Plus, Search, Sliders, Trash2, Zap } from 'lucide-react';
+import { LineChart, Line, ResponsiveContainer } from 'recharts';
+import { Activity, AlertTriangle, ArrowRightLeft, CheckCircle2, ChevronLeft, Database, Edit2, Globe, Info, Lock, Plus, Search, Shield, Sliders, ToggleLeft, ToggleRight, Trash2, Zap } from 'lucide-react';
 import { useSearchParams } from 'react-router';
 import { PolicyScopeFilterButton } from '@/components/atoms/PolicyScopeFilterButton';
 import { PolicyToggleButton } from '@/components/atoms/PolicyToggleButton';
 import { ENGINES } from '@/common/constants';
 import api from '@/lib/api';
 import { useGlobalUi } from '@/contexts/GlobalUiContext';
+
+const SPARK_DATA = [
+  { v: 10 }, { v: 15 }, { v: 12 }, { v: 30 }, { v: 25 },
+  { v: 45 }, { v: 40 }, { v: 60 }, { v: 55 }, { v: 70 },
+];
 
 type PolicyScope = 'ORG' | 'TEAM' | 'ROLE' | 'USER';
 
@@ -278,7 +284,7 @@ export default function Policies() {
                   setSearchParams({});
                   setView('EDITOR');
                 }}
-                className="flex items-center justify-center gap-3 px-8 py-4 bg-primary hover:bg-primary-dim text-on-primary font-bold text-[11px] uppercase tracking-[0.2em] rounded-xl shadow-xl active:scale-95 transition-all status-glow"
+                className="w-full md:w-auto flex items-center justify-center gap-3 px-8 py-4 bg-primary hover:bg-primary-dim text-on-primary font-bold text-[11px] uppercase tracking-[0.2em] rounded-xl shadow-xl active:scale-95 transition-all status-glow"
               >
                 <Plus className="w-4 h-4" /> Create Protocol
               </button>
@@ -461,8 +467,8 @@ export default function Policies() {
                           <h3 className="text-lg font-black uppercase tracking-tight">Identity Designation</h3>
                           <p className="text-[10px] text-on-surface-variant font-bold uppercase tracking-widest opacity-40">Define protocol scope and target subjects</p>
                         </div>
-                        <div className="p-3 rounded-2xl border bg-primary/20 border-primary/20 text-primary">
-                          <Activity className="w-5 h-5" />
+                        <div className={`p-3 rounded-2xl border transition-all ${formState.isActive ? 'bg-primary/20 border-primary/20 text-primary shadow-lg shadow-primary/5' : 'bg-white/5 border-white/5 text-on-surface-variant'}`}>
+                          <Shield className="w-5 h-5" />
                         </div>
                       </div>
                       {editorError && <div className="glass-panel p-4 rounded-2xl text-[10px] font-bold uppercase tracking-widest text-error">{editorError}</div>}
@@ -493,11 +499,20 @@ export default function Policies() {
                     </div>
 
                     <div className="glass-panel p-6 rounded-3xl space-y-6">
-                      <h3 className="text-lg font-black uppercase tracking-tight flex items-center gap-3"><Zap className="text-primary w-5 h-5" /> Resource Boundaries</h3>
-                      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                        <input type="number" min={0} value={formState.limits.rpm} onChange={(event) => setFormState((prev) => ({ ...prev, limits: { ...prev.limits, rpm: Number(event.target.value) || 0 } }))} placeholder="Max Signal Burst [RPM]" className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-xs font-bold uppercase tracking-widest focus:border-primary/40 transition-all" />
-                        <input type="number" min={0} value={formState.limits.dailyTokens} onChange={(event) => setFormState((prev) => ({ ...prev, limits: { ...prev.limits, dailyTokens: Number(event.target.value) || 0 } }))} placeholder="Daily Cap [Tokens]" className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-xs font-bold uppercase tracking-widest focus:border-primary/40 transition-all" />
-                        <input type="number" min={0} value={formState.limits.monthlyBudget} onChange={(event) => setFormState((prev) => ({ ...prev, limits: { ...prev.limits, monthlyBudget: Number(event.target.value) || 0 } }))} placeholder="Monthly Credit [$]" className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-xs font-bold uppercase tracking-widest focus:border-primary/40 transition-all" />
+                      <h3 className="text-lg font-black uppercase tracking-tight flex items-center gap-3"><Activity className="text-primary w-5 h-5 shadow-sm" /> Resource Boundaries</h3>
+                      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 font-mono">
+                        <div className="space-y-2">
+                          <label className="text-[9px] font-black uppercase tracking-[0.3em] text-on-surface-variant opacity-60 ml-1">Max Signal Burst [RPM]</label>
+                          <input type="number" min={0} value={formState.limits.rpm} onChange={(event) => setFormState((prev) => ({ ...prev, limits: { ...prev.limits, rpm: Number(event.target.value) || 0 } }))} className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3.5 text-xs font-bold text-primary focus:border-primary/40 focus:ring-0 transition-all" />
+                        </div>
+                        <div className="space-y-2">
+                          <label className="text-[9px] font-black uppercase tracking-[0.3em] text-on-surface-variant opacity-60 ml-1">Daily Cap [Tokens]</label>
+                          <input type="number" min={0} value={formState.limits.dailyTokens} onChange={(event) => setFormState((prev) => ({ ...prev, limits: { ...prev.limits, dailyTokens: Number(event.target.value) || 0 } }))} className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3.5 text-xs font-bold text-primary focus:border-primary/40 focus:ring-0 transition-all" />
+                        </div>
+                        <div className="space-y-2">
+                          <label className="text-[9px] font-black uppercase tracking-[0.3em] text-on-surface-variant opacity-60 ml-1">Monthly Credit [$]</label>
+                          <input type="number" min={0} value={formState.limits.monthlyBudget} onChange={(event) => setFormState((prev) => ({ ...prev, limits: { ...prev.limits, monthlyBudget: Number(event.target.value) || 0 } }))} className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3.5 text-xs font-bold text-primary focus:border-primary/40 focus:ring-0 transition-all" />
+                        </div>
                       </div>
                       <div className="space-y-3">
                         <label className="text-[9px] font-black uppercase tracking-[0.3em] text-on-surface-variant opacity-60 ml-1">Authorized Compute Engines</label>
@@ -515,36 +530,184 @@ export default function Policies() {
                           ))}
                         </div>
                       </div>
+
+                      <div className="pt-6 border-t border-white/5 space-y-6">
+                        <h3 className="text-lg font-black uppercase tracking-tight flex items-center gap-3">
+                          <Globe className="text-primary w-5 h-5 shadow-sm" /> Network Integrity
+                        </h3>
+                        <div className="space-y-2">
+                          <div className="flex justify-between items-center px-1 mb-1">
+                            <label className="text-[9px] font-black uppercase tracking-[0.3em] text-on-surface-variant opacity-60">IP Authorization Allowlist</label>
+                            <span className="text-[8px] font-mono text-primary opacity-40 uppercase">CIDR or Static IPs (Comma Separated)</span>
+                          </div>
+                          <div className="relative group">
+                            <div className="absolute left-4 top-4 text-primary/40 group-focus-within:text-primary transition-colors">
+                              <Lock className="w-4 h-4" />
+                            </div>
+                            <textarea
+                              placeholder="e.g., 192.168.1.1, 10.0.0.0/24, 203.0.113.50"
+                              className="w-full bg-white/5 border border-white/10 rounded-2xl pl-12 pr-6 py-4 h-24 text-[10px] font-mono text-on-surface placeholder:text-on-surface-variant/20 focus:border-primary/40 transition-all resize-none shadow-inner"
+                            />
+                          </div>
+                          <div className="p-3 bg-primary/5 border border-primary/10 rounded-xl flex gap-3">
+                            <Info className="text-primary w-4 h-4 flex-shrink-0 mt-0.5" />
+                            <p className="text-[9px] font-bold text-on-surface-variant uppercase tracking-widest leading-relaxed">
+                              Incoming requests from outside these authorized IP coordinates will be rejected with an <span className="text-error font-black">ACCESS_DENIED_NETWORK</span> signal.
+                            </p>
+                          </div>
+                        </div>
+                      </div>
                     </div>
 
-                    <div className="glass-panel p-6 rounded-3xl space-y-4 border border-primary/20">
-                      <h4 className="text-[10px] font-black uppercase tracking-[0.3em] text-primary flex items-center gap-2"><ArrowRightLeft className="w-4 h-4" /> Failover Protocol</h4>
-                      <label className="flex items-center gap-2 text-[10px] font-bold uppercase tracking-widest text-on-surface-variant">
-                        <input type="checkbox" checked={formState.fallback.enabled} onChange={(event) => setFormState((prev) => ({ ...prev, fallback: { ...prev.fallback, enabled: event.target.checked } }))} />
-                        Enable failover
-                      </label>
+                    <div className="glass-panel p-8 rounded-3xl space-y-8">
+                      <div className="flex justify-between items-center">
+                        <h3 className="text-xl font-black uppercase tracking-tight flex items-center gap-3">
+                          <ArrowRightLeft className="text-primary w-5 h-5" /> Failover Protocol
+                        </h3>
+                        <button
+                          type="button"
+                          onClick={() => setFormState((prev) => ({ ...prev, fallback: { ...prev.fallback, enabled: !prev.fallback.enabled } }))}
+                          className={`flex items-center gap-2 text-[10px] font-black uppercase tracking-[0.2em] transition-all ${formState.fallback.enabled ? 'text-primary' : 'text-on-surface-variant opacity-40'}`}
+                        >
+                          {formState.fallback.enabled ? <ToggleRight className="w-8 h-8" /> : <ToggleLeft className="w-8 h-8" />}
+                        </button>
+                      </div>
                       {formState.fallback.enabled && (
-                        <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                          <input type="number" min={0} max={100} value={formState.fallback.threshold} onChange={(event) => setFormState((prev) => ({ ...prev, fallback: { ...prev.fallback, threshold: Number(event.target.value) || 0 } }))} placeholder="Saturation Threshold [%]" className="bg-transparent border border-white/10 rounded-xl px-4 py-3 text-xs font-bold uppercase tracking-widest" />
-                          <input type="text" value={formState.fallback.fromModel} onChange={(event) => setFormState((prev) => ({ ...prev, fallback: { ...prev.fallback, fromModel: event.target.value } }))} placeholder="From Engine" className="bg-transparent border border-white/10 rounded-xl px-4 py-3 text-xs font-bold uppercase tracking-widest" />
-                          <input type="text" value={formState.fallback.toModel} onChange={(event) => setFormState((prev) => ({ ...prev, fallback: { ...prev.fallback, toModel: event.target.value } }))} placeholder="To Engine [Failover]" className="bg-transparent border border-white/10 rounded-xl px-4 py-3 text-xs font-bold uppercase tracking-widest" />
-                        </div>
+                        <motion.div
+                          initial={{ opacity: 0, height: 0 }}
+                          animate={{ opacity: 1, height: 'auto' }}
+                          className="grid grid-cols-1 md:grid-cols-3 gap-6 pt-4 border-t border-white/5"
+                        >
+                          <div className="space-y-2">
+                            <label className="text-[9px] font-black uppercase tracking-[0.3em] text-on-surface-variant opacity-60 ml-1">Saturation Threshold [%]</label>
+                            <input type="number" min={0} max={100} value={formState.fallback.threshold} onChange={(event) => setFormState((prev) => ({ ...prev, fallback: { ...prev.fallback, threshold: Number(event.target.value) || 0 } }))} className="w-full bg-white/5 border border-white/10 rounded-xl px-5 py-4 text-xs font-bold text-primary focus:border-primary/40 focus:ring-0 transition-all" />
+                          </div>
+                          <div className="space-y-2">
+                            <label className="text-[9px] font-black uppercase tracking-[0.3em] text-on-surface-variant opacity-60 ml-1">From Engine</label>
+                            <select value={formState.fallback.fromModel} onChange={(event) => setFormState((prev) => ({ ...prev, fallback: { ...prev.fallback, fromModel: event.target.value } }))} className="w-full bg-white/5 border border-white/10 rounded-xl px-5 py-4 text-xs font-bold uppercase tracking-widest focus:border-primary/40 transition-all appearance-none cursor-pointer">
+                              <option value="" className="bg-surface">Select Anchor</option>
+                              {ENGINES.map((e) => <option key={e} value={e} className="bg-surface">{e}</option>)}
+                            </select>
+                          </div>
+                          <div className="space-y-2">
+                            <label className="text-[9px] font-black uppercase tracking-[0.3em] text-on-surface-variant opacity-60 ml-1">To Engine [Failover]</label>
+                            <select value={formState.fallback.toModel} onChange={(event) => setFormState((prev) => ({ ...prev, fallback: { ...prev.fallback, toModel: event.target.value } }))} className="w-full bg-white/5 border border-white/10 rounded-xl px-5 py-4 text-xs font-bold uppercase tracking-widest focus:border-primary/40 transition-all appearance-none cursor-pointer">
+                              <option value="" className="bg-surface">Select Failover</option>
+                              {ENGINES.map((e) => <option key={e} value={e} className="bg-surface">{e}</option>)}
+                            </select>
+                          </div>
+                        </motion.div>
                       )}
                     </div>
                   </motion.div>
                 ) : (
                   <motion.div key="simulation" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }} className="lg:col-span-8 space-y-6">
-                    <div className="glass-panel p-10 rounded-3xl border border-primary/20">
-                      <h3 className="text-3xl font-black uppercase tracking-tighter mb-4 text-primary">Simulation <span className="text-on-surface">Matrix</span></h3>
-                      <p className="text-xs text-on-surface-variant font-bold uppercase tracking-widest leading-relaxed opacity-60">
-                        Predict cluster impact and resource consumption based on configured protocol parameters.
-                      </p>
+                    <div className="glass-panel p-10 rounded-3xl border border-primary/20 space-y-8 relative overflow-hidden">
+                      <div className="absolute top-0 right-0 p-10 opacity-5 pointer-events-none">
+                        <Zap className="w-64 h-64 text-primary" />
+                      </div>
+                      <div className="relative z-10 space-y-8">
+                        <div className="flex justify-between items-start">
+                          <div className="max-w-md">
+                            <h3 className="text-3xl font-black uppercase tracking-tighter mb-4 text-primary">Simulation <span className="text-on-surface">Matrix</span></h3>
+                            <p className="text-xs text-on-surface-variant font-bold uppercase tracking-widest leading-relaxed opacity-60">
+                              Predict cluster impact and resource consumption based on the configured protocol parameters.
+                            </p>
+                          </div>
+                          <div className="flex flex-col items-end gap-2">
+                            <div className="px-4 py-2 bg-primary/10 border border-primary/20 rounded-xl flex items-center gap-3">
+                              <div className="relative w-8 h-8">
+                                <svg className="w-full h-full -rotate-90" viewBox="0 0 36 36">
+                                  <circle cx="18" cy="18" r="16" fill="none" className="stroke-white/10" strokeWidth="3" />
+                                  <circle cx="18" cy="18" r="16" fill="none" className="stroke-primary" strokeWidth="3" strokeDasharray="100" strokeDashoffset="5" />
+                                </svg>
+                                <div className="absolute inset-0 flex items-center justify-center">
+                                  <span className="text-[8px] font-black text-primary">95</span>
+                                </div>
+                              </div>
+                              <div>
+                                <p className="text-[8px] font-black uppercase tracking-widest text-on-surface-variant opacity-60">Confidence Score</p>
+                                <p className="text-[10px] font-black text-primary uppercase">High Precision</p>
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+                          <div className="space-y-6 p-8 bg-white/5 rounded-3xl border border-white/5">
+                            <h4 className="text-[10px] font-black uppercase tracking-[0.3em] text-primary">Input Subject Overview</h4>
+                            <div className="space-y-4">
+                              {[
+                                { label: 'Designation', value: 'Alex Rivera // sc-001' },
+                                { label: 'Auth Role', value: 'OPERATOR // DEFENSE' },
+                                { label: 'Engines', value: 'GPT-4o, Sonnet-3.5', highlight: true },
+                              ].map((row) => (
+                                <div key={row.label} className="flex justify-between items-center pb-2 border-b border-white/5">
+                                  <span className="text-[9px] font-black uppercase tracking-widest text-on-surface-variant">{row.label}</span>
+                                  <span className={`text-[10px] font-mono font-bold uppercase ${row.highlight ? 'text-primary' : 'text-on-surface'}`}>{row.value}</span>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+
+                          <div className="space-y-6 p-8 bg-white/5 rounded-3xl border border-white/5">
+                            <div className="flex justify-between items-center">
+                              <h4 className="text-[10px] font-black uppercase tracking-[0.3em] text-primary">Predicted Flux Trends</h4>
+                              <div className="px-2 py-1 bg-error/10 border border-error/20 rounded-lg text-[8px] font-black text-error uppercase animate-pulse">Spike Alert</div>
+                            </div>
+                            <div className="space-y-5">
+                              {[
+                                { label: 'Saturation', value: '12.4% Optimal', stroke: '#38bdf8', data: SPARK_DATA },
+                                { label: 'Cost Delta', value: '-$42.10 (Saved)', stroke: '#f59e0b', data: SPARK_DATA },
+                                { label: 'Latency Impact', value: '~420ms', stroke: '#ef4444', data: [...SPARK_DATA].reverse(), warn: true },
+                              ].map((row) => (
+                                <div key={row.label} className="flex justify-between items-center">
+                                  <div className="space-y-1">
+                                    <span className="text-[9px] font-black uppercase tracking-widest text-on-surface-variant block">{row.label}</span>
+                                    <div className="flex items-center gap-2">
+                                      <span className="text-[10px] font-mono font-bold text-on-surface">{row.value}</span>
+                                      {row.warn && <AlertTriangle className="w-3 h-3 text-error" />}
+                                    </div>
+                                  </div>
+                                  <div className="w-24 h-8">
+                                    <ResponsiveContainer width="100%" height="100%">
+                                      <LineChart data={row.data}>
+                                        <Line type="monotone" dataKey="v" stroke={row.stroke} strokeWidth={2} dot={false} isAnimationActive={false} />
+                                      </LineChart>
+                                    </ResponsiveContainer>
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        </div>
+
+                        <div className="space-y-4 pt-6 border-t border-white/5">
+                          <div className="flex justify-between items-center">
+                            <div className="space-y-1">
+                              <span className="text-[10px] font-black uppercase tracking-widest text-on-surface-variant">Probability of Saturation Failover</span>
+                              <p className="text-[8px] font-bold text-error uppercase tracking-widest">Potential spike detected at 16:00 UTC</p>
+                            </div>
+                            <span className="text-[14px] font-mono font-bold text-primary">2.4%</span>
+                          </div>
+                          <div className="h-3 w-full bg-white/5 rounded-full overflow-hidden relative">
+                            <motion.div initial={{ width: 0 }} animate={{ width: '12.4%' }} className="h-full bg-primary status-glow relative z-10" />
+                            <div className="absolute top-0 left-[65%] w-0.5 h-full bg-error/40 z-20" />
+                            <div className="absolute top-0 left-[85%] w-0.5 h-full bg-error/40 z-20" />
+                          </div>
+                        </div>
+                      </div>
                     </div>
-                    <div className="p-8 bg-error/5 border border-error/20 rounded-3xl flex gap-6">
-                      <div className="space-y-2">
+
+                    <div className="p-8 bg-error/5 border border-error/20 rounded-3xl flex gap-6 relative overflow-hidden">
+                      <div className="absolute top-[-20px] left-[-20px] p-10 opacity-5 rotate-12 pointer-events-none">
+                        <AlertTriangle className="w-24 h-24 text-error" />
+                      </div>
+                      <AlertTriangle className="text-error w-10 h-10 flex-shrink-0 relative z-10" />
+                      <div className="space-y-2 relative z-10">
                         <h4 className="text-lg font-black uppercase tracking-tight text-error">Anomalous Spike Prediction</h4>
                         <p className="text-[11px] font-bold text-on-surface-variant uppercase tracking-widest leading-relaxed opacity-60">
-                          Simulation data is placeholder until policy analytics endpoint is available.
+                          The current daily token cap for 'Sarah Chen' might trigger failover protocols prematurely during peak cycle hours (14:00 - 18:00 UTC). Predicted spike: +240% above baseline.
                         </p>
                       </div>
                     </div>
@@ -553,23 +716,61 @@ export default function Policies() {
               </AnimatePresence>
 
               <div className="lg:col-span-4 space-y-8">
-                <div className="glass-panel p-8 rounded-3xl space-y-6">
+                <div className="glass-panel p-8 rounded-3xl space-y-8">
                   <h3 className="text-xl font-black uppercase tracking-tight flex items-center gap-3"><Sliders className="text-primary w-5 h-5" /> Hierarchy Layering</h3>
-                  <div className="space-y-4">
+                  <div className="space-y-6 relative ml-4">
+                    <div className="absolute left-[-17px] top-6 bottom-4 w-px bg-white/10 border-l border-dashed border-white/20" />
                     {[
-                      'USER Level - Highest precision',
-                      'ROLE Cluster - Inherited by assigned agents',
-                      'TEAM Tactical - Unit-wide boundaries',
-                      'ORG Global - Baseline logic',
-                    ].map((layer) => (
-                      <p key={layer} className="text-[10px] font-black uppercase tracking-widest text-on-surface-variant">{layer}</p>
-                    ))}
+                      { label: 'USER Level', desc: 'Highest precision. Overrides all.', scope: 'USER' as PolicyScope },
+                      { label: 'ROLE Cluster', desc: 'Inherited by assigned agents.', scope: 'ROLE' as PolicyScope },
+                      { label: 'TEAM Tactical', desc: 'Unit-wide boundaries.', scope: 'TEAM' as PolicyScope },
+                      { label: 'ORG Global', desc: 'Baseline foundational logic.', scope: 'ORG' as PolicyScope },
+                    ].map((layer) => {
+                      const active = formState.scope === layer.scope;
+                      return (
+                        <div key={layer.scope} className="relative group">
+                          <div className={`absolute left-[-22px] top-1.5 w-3 h-3 rounded-full border-2 border-surface transition-all ${active ? 'bg-primary status-glow scale-125' : 'bg-surface-container-high border-white/20'}`} />
+                          <div className={`transition-all ${active ? 'translate-x-1' : 'opacity-40 group-hover:opacity-60'}`}>
+                            <p className={`text-[10px] font-black uppercase tracking-[0.2em] mb-1 ${active ? 'text-primary' : 'text-on-surface'}`}>{layer.label}</p>
+                            <p className="text-[9px] font-bold text-on-surface-variant uppercase tracking-widest italic">{layer.desc}</p>
+                          </div>
+                        </div>
+                      );
+                    })}
                   </div>
                   <div className="p-4 bg-primary/5 border border-primary/20 rounded-2xl flex gap-3">
                     <Info className="text-primary w-4 h-4 flex-shrink-0" />
                     <p className="text-[10px] font-bold text-on-surface-variant uppercase tracking-widest leading-relaxed">
-                      Rules are evaluated top-down; first match is enforced.
+                      Rules are evaluated from top to bottom. The first match on the User-Role link triggers absolute enforcement.
                     </p>
+                  </div>
+                </div>
+
+                <div className="glass-panel p-8 rounded-3xl space-y-8">
+                  <div className="flex justify-between items-center">
+                    <h3 className="text-xl font-black uppercase tracking-tight">Active Reach</h3>
+                    <span className="text-[10px] font-mono text-primary font-bold uppercase tracking-widest bg-primary/10 px-2 py-0.5 rounded">12 subjects</span>
+                  </div>
+                  <div className="space-y-4">
+                    {[
+                      { name: 'Sarah Chen', team: 'Neural-Ops', status: 'MATCH' },
+                      { name: 'Alex Rivera', team: 'Fleet-Command', status: 'INHERIT' },
+                      { name: 'Elena Belova', team: 'Intel', status: 'INHERIT' },
+                    ].map((person) => (
+                      <div key={person.name} className="flex justify-between items-center p-3 bg-white/5 border border-white/5 rounded-xl group hover:bg-white/10 transition-all cursor-crosshair">
+                        <div className="flex gap-4 items-center">
+                          <div className="w-8 h-8 rounded-lg bg-surface flex items-center justify-center font-black text-[9px] uppercase tracking-tighter border border-white/10 text-primary">
+                            {person.name[0]}
+                          </div>
+                          <div>
+                            <p className="text-[10px] font-black text-on-surface uppercase tracking-tight">{person.name}</p>
+                            <p className="text-[8px] text-primary font-mono opacity-50 uppercase tracking-widest">{person.team}</p>
+                          </div>
+                        </div>
+                        <span className={`text-[8px] font-black uppercase tracking-widest px-2 py-0.5 rounded ${person.status === 'MATCH' ? 'bg-primary/20 text-primary' : 'bg-white/10 text-on-surface-variant'}`}>{person.status}</span>
+                      </div>
+                    ))}
+                    <button type="button" className="w-full py-2 text-[9px] font-black uppercase tracking-[0.3em] text-on-surface-variant hover:text-white transition-all opacity-40">View full manifest →</button>
                   </div>
                 </div>
 

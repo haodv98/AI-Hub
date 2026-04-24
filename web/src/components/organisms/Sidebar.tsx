@@ -1,6 +1,7 @@
 import { NavLink } from 'react-router';
-import { LayoutDashboard, Users, User, Key, Gavel, BarChart3, History, Settings, FileBox } from 'lucide-react';
+import { LayoutDashboard, Users, User, Key, Gavel, BarChart3, History, Settings, FileBox, LogOut } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
+import { useGlobalUi } from '@/contexts/GlobalUiContext';
 
 const navItems = [
   { id: 'dashboard', to: '/dashboard', icon: LayoutDashboard, label: 'Dashboard', adminOnly: false },
@@ -15,6 +16,7 @@ const navItems = [
 
 export const Sidebar = () => {
   const { isAdmin } = useAuth();
+  const { openLogoutModal } = useGlobalUi();
 
   return (
     <aside className="hidden md:flex flex-col h-screen w-64 fixed left-0 top-0 glass-panel border-r-0 py-6 space-y-1 z-40 rounded-r-3xl">
@@ -55,10 +57,25 @@ export const Sidebar = () => {
         </div>
       </div>
 
-      <div className="mt-auto space-y-1 px-3">
-        <button className="w-full text-on-surface-variant hover:text-on-surface hover:bg-white/5 px-5 py-3 flex items-center transition-all rounded-xl group">
-          <Settings className="mr-3 w-4 h-4 group-hover:text-primary" />
-          <span className="text-[10px] uppercase tracking-widest font-bold">Settings</span>
+      <div className="mt-auto space-y-1 px-3 pb-6">
+        <NavLink
+          to="/settings"
+          className={({ isActive }) => `
+            flex items-center px-5 py-3 transition-all duration-300 group rounded-xl
+            ${isActive 
+              ? 'bg-primary/20 text-primary font-bold shadow-[0_0_15px_rgba(56,189,248,0.2)] border border-primary/20' 
+              : 'text-on-surface-variant hover:text-on-surface hover:bg-white/5'}
+          `}
+        >
+          <Settings className={`mr-3 w-4 h-4 ${'group-hover:text-primary'}`} />
+          <span className="text-[10px] uppercase tracking-[0.15em] font-bold">Settings</span>
+        </NavLink>
+        <button 
+          onClick={openLogoutModal}
+          className="w-full text-on-surface-variant hover:text-error hover:bg-error/5 px-5 py-3 flex items-center transition-all rounded-xl group"
+        >
+          <LogOut className="mr-3 w-4 h-4 group-hover:text-error" />
+          <span className="text-[10px] uppercase tracking-widest font-bold">Terminate Session</span>
         </button>
       </div>
     </aside>

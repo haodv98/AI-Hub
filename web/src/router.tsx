@@ -12,6 +12,7 @@ import PolicyEditor from '@/pages/PolicyEditor';
 import Usage from '@/pages/Usage';
 import AuditLogs from '@/pages/AuditLogs';
 import Reports from '@/pages/Reports';
+import Settings from '@/pages/Settings';
 import NotFound from '@/pages/NotFound';
 
 function AdminOnly({ children }: { children: React.ReactNode }) {
@@ -76,6 +77,14 @@ export const router = createBrowserRouter([
         element: (
           <AdminOnly>
             <AuditLogs />
+          </AdminOnly>
+        ),
+      },
+      {
+        path: 'settings',
+        element: (
+          <AdminOnly>
+            <Settings />
           </AdminOnly>
         ),
       },

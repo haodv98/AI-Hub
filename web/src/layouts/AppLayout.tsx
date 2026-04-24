@@ -1,5 +1,5 @@
-import { Outlet, useLocation } from 'react-router';
-import { motion, AnimatePresence } from 'motion/react';
+import { Outlet } from 'react-router';
+import { motion } from 'motion/react';
 import { Sidebar } from '@/components/organisms/Sidebar';
 import { TopBar } from '@/components/organisms/TopBar';
 import { Glow } from '@/components/atoms/Glow';
@@ -10,7 +10,6 @@ import { useGlobalUi } from '@/contexts/GlobalUiContext';
 import { useEffect } from 'react';
 
 export default function AppLayout() {
-  const location = useLocation();
   const { openCommandPalette } = useGlobalUi();
 
   useEffect(() => {
@@ -36,17 +35,13 @@ export default function AppLayout() {
         <TopBar />
         
         <div className="flex-1 p-4 md:p-8 max-w-7xl mx-auto w-full">
-          <AnimatePresence mode="wait">
-            <motion.div
-              key={location.pathname}
-              initial={{ opacity: 0, y: 10 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -10 }}
-              transition={{ duration: 0.2, ease: "easeOut" }}
-            >
-              <Outlet />
-            </motion.div>
-          </AnimatePresence>
+          <motion.div
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.3, ease: "easeOut" }}
+          >
+            <Outlet />
+          </motion.div>
         </div>
       </main>
       <CommandPalette />

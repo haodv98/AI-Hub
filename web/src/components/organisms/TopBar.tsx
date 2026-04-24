@@ -1,4 +1,5 @@
-import { Grid2X2, Search } from 'lucide-react';
+import { useState } from 'react';
+import { Grid2X2, Search, Menu, X } from 'lucide-react';
 import { NavLink, useLocation } from 'react-router';
 import { useAuth } from '@/contexts/AuthContext';
 import { useGlobalUi } from '@/contexts/GlobalUiContext';
@@ -7,16 +8,36 @@ export const TopBar = () => {
   const { userName } = useAuth();
   const location = useLocation();
   const { openCommandPalette, openLogoutModal } = useGlobalUi();
+  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
 
   const isActive = (path: string) => location.pathname.startsWith(path);
 
   return (
-    <header className="glass-panel text-on-surface h-20 px-8 flex justify-between items-center sticky top-0 z-30 m-4 rounded-2xl">
-      <div className="flex items-center space-x-8">
-        <button className="text-on-surface-variant hover:text-primary p-2 rounded-xl transition-all duration-200 hover:bg-white/5">
+    <header className="glass-panel text-on-surface h-20 px-4 md:px-8 flex justify-between items-center sticky top-0 z-30 m-4 rounded-2xl">
+      <div className="flex items-center space-x-4 md:space-x-8">
+        {/* Mobile menu button */}
+        <button
+          onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
+          className="lg:hidden text-on-surface-variant hover:text-primary p-2 rounded-xl transition-all duration-200 hover:bg-white/5"
+        >
+          {isMobileMenuOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
+        </button>
+        
+        <button className="hidden md:block text-on-surface-variant hover:text-primary p-2 rounded-xl transition-all duration-200 hover:bg-white/5">
           <Grid2X2 className="w-5 h-5" />
         </button>
         
+        {/* Mobile search button */}
+        <button
+          type="button"
+          onClick={openCommandPalette}
+          className="lg:hidden flex items-center gap-2 px-3 py-2 bg-white/5 rounded-xl border border-white/5 transition-all"
+        >
+          <Search className="w-4 h-4 text-on-surface-variant" />
+          <span className="text-[9px] text-primary font-black tracking-widest">CMD+K</span>
+        </button>
+
+        {/* Desktop search */}
         <button
           type="button"
           onClick={openCommandPalette}
@@ -27,6 +48,36 @@ export const TopBar = () => {
           <span className="text-[9px] text-primary font-black tracking-widest">CMD+K</span>
         </button>
 
+        {/* Mobile navigation menu */}
+        {isMobileMenuOpen && (
+          <div className="lg:hidden absolute top-20 left-4 right-4 glass-panel rounded-2xl p-4 shadow-2xl z-20">
+            <nav className="flex flex-col space-y-3 text-[11px] font-bold uppercase tracking-widest">
+              <NavLink 
+                to="/dashboard"
+                onClick={() => setIsMobileMenuOpen(false)}
+                className={({ isActive }) => isActive ? 'text-primary border-b border-primary pb-1' : 'text-on-surface-variant hover:text-on-surface'}
+              >
+                Dashboard
+              </NavLink>
+              <NavLink 
+                to="/teams"
+                onClick={() => setIsMobileMenuOpen(false)}
+                className={({ isActive }) => isActive ? 'text-primary border-b border-primary pb-1' : 'text-on-surface-variant hover:text-on-surface'}
+              >
+                Teams
+              </NavLink>
+              <NavLink 
+                to="/members"
+                onClick={() => setIsMobileMenuOpen(false)}
+                className={({ isActive }) => isActive ? 'text-primary border-b border-primary pb-1' : 'text-on-surface-variant hover:text-on-surface'}
+              >
+                Fleet
+              </NavLink>
+            </nav>
+          </div>
+        )}
+
+        {/* Desktop navigation */}
         <nav className="hidden xl:flex space-x-6 text-[11px] font-bold uppercase tracking-widest">
           <NavLink 
             to="/dashboard"

@@ -80,8 +80,8 @@ export default function Reports() {
             </span>
           )}
         </div>
-
-        <table className="w-full min-w-[760px] text-left">
+        <div className="overflow-x-auto">
+          <table className="w-full min-w-[760px] text-left">
           <thead>
             <tr className="bg-white/5">
               <th className="px-8 py-4 text-[10px] font-black uppercase tracking-[0.2em] text-on-surface-variant opacity-60">Month</th>
@@ -114,6 +114,7 @@ export default function Reports() {
             )}
           </tbody>
         </table>
+        </div>
       </div>
     </div>
   );

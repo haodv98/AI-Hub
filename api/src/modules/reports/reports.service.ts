@@ -160,16 +160,21 @@ export class ReportsService {
 
   @Cron('0 6 1 * *')
   async runMonthlyReportJob(): Promise<void> {
-    const now = new Date();
-    const previousMonthStart = startOfMonth(new Date(now.getFullYear(), now.getMonth() - 1, 1));
-    const previousMonthEnd = new Date(now.getFullYear(), now.getMonth(), 0, 23, 59, 59, 999);
-    const month = previousMonthStart.toISOString().slice(0, 7);
-    const preview = await this.getCurrentMonthPreview(previousMonthStart, previousMonthEnd);
-    await this.deliverMonthlyReport({
-      month,
-      totalSpendUsd: preview.totalSpendUsd,
-    });
-    this.logger.log(`Monthly report job completed for ${month}`);
+    try {
+      const now = new Date();
+      const previousMonthStart = startOfMonth(new Date(now.getFullYear(), now.getMonth() - 1, 1));
+      const previousMonthEnd = new Date(now.getFullYear(), now.getMonth(), 0, 23, 59, 59, 999);
+      const month = previousMonthStart.toISOString().slice(0, 7);
+      const preview = await this.getCurrentMonthPreview(previousMonthStart, previousMonthEnd);
+      await this.deliverMonthlyReport({
+        month,
+        totalSpendUsd: preview.totalSpendUsd,
+      });
+      this.logger.log(`Monthly report job completed for ${month}`);
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
+      this.logger.warn(`runMonthlyReportJob skipped — DB unavailable: ${message}`);
+    }
   }
 
   private async canUseUsageDaily(): Promise<boolean> {
