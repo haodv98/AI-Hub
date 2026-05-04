@@ -1,14 +1,34 @@
 import { NestFactory } from '@nestjs/core';
 import { ValidationPipe } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { NestExpressApplication } from '@nestjs/platform-express';
 import { Logger } from 'nestjs-pino';
 import helmet from 'helmet';
+import { json, urlencoded, type Request } from 'express';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { AppModule } from './app.module';
 import { GlobalExceptionFilter } from './common/filters/global-exception.filter';
 
 async function bootstrap() {
-  const app = await NestFactory.create(AppModule, { bufferLogs: true, rawBody: true });
+  const app = await NestFactory.create<NestExpressApplication>(AppModule, {
+    bufferLogs: true,
+    rawBody: true,
+    bodyParser: false,
+  });
+
+  const config = app.get(ConfigService);
+  const bodyLimit = config.get<string>('HTTP_BODY_LIMIT', '25mb');
+  app.use(
+    json({
+      limit: bodyLimit,
+      verify: (req: Request & { rawBody?: Buffer }, _res, buf) => {
+        if (Buffer.isBuffer(buf) && buf.length) {
+          req.rawBody = buf;
+        }
+      },
+    }),
+  );
+  app.use(urlencoded({ limit: bodyLimit, extended: true }));
 
   // Structured logging via pino
   app.useLogger(app.get(Logger));
@@ -25,7 +45,6 @@ async function bootstrap() {
   );
 
   // CORS — restrict to admin portal origin in production
-  const config = app.get(ConfigService);
   const isDev = config.get('NODE_ENV') !== 'production';
   app.enableCors({
     origin: isDev ? true : [config.get('PORTAL_ORIGIN', 'https://aihub.internal')],

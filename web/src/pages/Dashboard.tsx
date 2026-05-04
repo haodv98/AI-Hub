@@ -5,7 +5,7 @@ import { AlertCircle, Terminal, ArrowRight, UserPlus, Wallet } from 'lucide-reac
 import { KPICard } from '@/components/molecules/KPICard';
 import { ProgressBar } from '@/components/atoms/ProgressBar';
 import { formatUsd, formatNumber } from '@/lib/utils';
-import api from '@/lib/api';
+import { getEnvelope } from '@/lib/api';
 
 interface DailySummaryRow {
   date: string;
@@ -37,7 +37,7 @@ function useDashboardSummary() {
   const to = now.toISOString().split('T')[0];
   return useQuery<OrgSummary>({
     queryKey: ['usage', 'summary', from, to],
-    queryFn: () => api.get(`/usage/summary?from=${from}&to=${to}`).then((r) => r.data.data),
+    queryFn: () => getEnvelope<OrgSummary>('/usage/summary', { from, to }),
     refetchInterval: 60_000,
   });
 }

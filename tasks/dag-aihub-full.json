@@ -1,0 +1,292 @@
+{
+  "title": "AI Hub — full task graph (completed ledger + Phase 4 + exclusions LDAP/Slack; runner ignores _meta)",
+  "_meta": {
+    "completed_summary": "Phase 1 (tasks/phase1-foundation.md): toàn bộ TASK-001–018, 040–045, 050–053, 060–062, 070–074, 080–084, 090–096, 110–111 và checklist deliverables cuối file — đều [x]. Phase 2 (phase2-mvp.md): TASK-200–203, 220–221, 230–231, 240–243, 250, 260–263, 270–271, 280–281, 290–292 — [x]. Phase 3 (phase3-rollout.md): TASK-300–342, 351, 360–364, 370–375, 383, 390, 395 — [x]. Cross-cutting: CTO sign-off + D2/D3/D4/D7 resolved — [x].",
+    "excluded": [
+      {
+        "id": "TASK-350",
+        "reason": "Keycloak LDAP/AD sync — loại khỏi scope (phase3-rollout: LDAP deferred / not used)."
+      },
+      {
+        "id": "milestone-keycloak-ldap-active",
+        "reason": "Milestone đăng nhập corporate qua LDAP — excluded (LDAP not used)."
+      },
+      {
+        "id": "cross-cutting-slack-workspace-admin",
+        "reason": "Slack workspace admin access (cross-cutting.md) — không làm tích hợp Slack."
+      },
+      {
+        "id": "TASK-411-slack-notifications",
+        "reason": "TASK-411 spec có Slack DM — thay bằng email/in-app only, không Slack."
+      },
+      {
+        "id": "TASK-433-slack-delivery",
+        "reason": "TASK-433 spec có Slack + email — chỉ email + DB store, không Slack."
+      },
+      {
+        "id": "TASK-221-slack-phase3-note",
+        "reason": "Ghi chú Alerts (Slack Phase 3) trong phase2 — không triển khai Slack; giữ email/DB."
+      }
+    ]
+  },
+  "tasks": [
+    {
+      "id": "meta-completed-ledger",
+      "depends_on": [],
+      "complexity": "LOW",
+      "subtask_prompt": "Đọc tasks/phase1-foundation.md, phase2-mvp.md, phase3-rollout.md và liệt kê (markdown table) tất cả dòng checklist có [x] kèm TASK-xxx nếu có. Không sửa code; chỉ báo cáo để đối chiếu ledger với _meta.completed_summary trong dag-aihub-full.json."
+    },
+    {
+      "id": "meta-excluded-ldap-slack",
+      "depends_on": [],
+      "complexity": "LOW",
+      "subtask_prompt": "Đọc file dag tasks/dag-aihub-full.json field _meta.excluded. Xuất bảng markdown: id, reason. Không implement LDAP hay Slack. Không sửa repo trừ khi chỉ thêm ghi chú ADR/docs một dòng “out of scope” nếu thực sự cần."
+    },
+    {
+      "id": "t-380-k8s-manifests",
+      "depends_on": [],
+      "complexity": "HIGH",
+      "subtask_prompt": "TASK-380 (phase3-rollout.md): Kubernetes manifests on-prem production. infra/ layout + README. Không hardcode secret."
+    },
+    {
+      "id": "t-381-compose-staging",
+      "depends_on": [],
+      "complexity": "MED",
+      "subtask_prompt": "TASK-381: Docker Compose profile cho staging, .env.staging.example, tách khỏi dev/prod."
+    },
+    {
+      "id": "t-382-cicd",
+      "depends_on": [
+        "t-380-k8s-manifests",
+        "t-381-compose-staging"
+      ],
+      "complexity": "MED",
+      "subtask_prompt": "TASK-382: CI/CD staging + production sau khi có skeleton K8s (380) và compose staging (381). GitHub Actions: build/test api+web, gate migrate."
+    },
+    {
+      "id": "t-fe-members",
+      "depends_on": [],
+      "complexity": "MED",
+      "subtask_prompt": "Phase3 matrix: Members page — endpoint thật cho create/offboard/tier/import + pagination (web/src)."
+    },
+    {
+      "id": "t-fe-teamdetail",
+      "depends_on": [],
+      "complexity": "MED",
+      "subtask_prompt": "TeamDetail: mutations thật + query invalidation (web/src/pages/TeamDetail.tsx)."
+    },
+    {
+      "id": "t-fe-memberdetail",
+      "depends_on": [],
+      "complexity": "MED",
+      "subtask_prompt": "MemberDetail: ẩn/disable actions không có backend; unsupported state rõ ràng."
+    },
+    {
+      "id": "t-fe-shared-envelope",
+      "depends_on": [],
+      "complexity": "MED",
+      "subtask_prompt": "AuditLogs / Usage / Reports: envelope parsing chung, retry/error/empty states."
+    },
+    {
+      "id": "t-docs-matrix",
+      "depends_on": [],
+      "complexity": "LOW",
+      "subtask_prompt": "docs/integration/phase3-web-backend-matrix.md — cập nhật trạng thái action theo role khớp code."
+    },
+    {
+      "id": "t-x01-test-infra",
+      "depends_on": [],
+      "complexity": "MED",
+      "subtask_prompt": "TASK-X01 cross-cutting: test DB + Vitest/Jest infra cho api; script chạy được."
+    },
+    {
+      "id": "t-p2-policy-tests",
+      "depends_on": [],
+      "complexity": "MED",
+      "subtask_prompt": "Phase2 acceptance: policy cascade ≥15 tests, coverage ≥80% (policies module)."
+    },
+    {
+      "id": "t-p2-gateway-verify",
+      "depends_on": [],
+      "complexity": "HIGH",
+      "subtask_prompt": "Phase2 acceptance: gateway model access + budget + smart fallback — verify/fix gaps."
+    },
+    {
+      "id": "t-x02-e2e-gateway",
+      "depends_on": [
+        "t-x01-test-infra"
+      ],
+      "complexity": "HIGH",
+      "subtask_prompt": "TASK-X02: gateway E2E integration tests (api)."
+    },
+    {
+      "id": "t-x03-playwright",
+      "depends_on": [
+        "t-x01-test-infra"
+      ],
+      "complexity": "MED",
+      "subtask_prompt": "TASK-X03: Playwright smoke admin portal."
+    },
+    {
+      "id": "t-cross-y01-adr",
+      "depends_on": [],
+      "complexity": "LOW",
+      "subtask_prompt": "TASK-Y01: ADR index + ADR cho quyết định implementation gần đây nếu thiếu."
+    },
+    {
+      "id": "t-cross-y02-env",
+      "depends_on": [],
+      "complexity": "LOW",
+      "subtask_prompt": "TASK-Y02: docs/env-vars.md đồng bộ env mới từ code."
+    },
+    {
+      "id": "t-p3-391-onboarding",
+      "depends_on": [],
+      "complexity": "MED",
+      "subtask_prompt": "TASK-391: kế hoạch + checklist vận hành batch onboarding 7 teams (tài liệu/runbook; không cần tự onboard thật trừ khi user yêu cầu)."
+    },
+    {
+      "id": "p4-400-overprovisioning",
+      "depends_on": [],
+      "complexity": "MED",
+      "subtask_prompt": "TASK-400: cost-analysis.service.ts — báo cáo overprovisioning 30 ngày, cron weekly. File phase4-optimization.md."
+    },
+    {
+      "id": "p4-401-license-util",
+      "depends_on": [],
+      "complexity": "MED",
+      "subtask_prompt": "TASK-401: license.service.ts + GET reports/license-utilization. seat_licenses vs usage."
+    },
+    {
+      "id": "p4-402-response-cache",
+      "depends_on": [],
+      "complexity": "HIGH",
+      "subtask_prompt": "TASK-402: gateway Redis cache exact-hash, TTL, skip stream/tool/high temp. Header X-AIHub-Cache. Policy flag cacheEnabled."
+    },
+    {
+      "id": "p4-403-cost-dashboard",
+      "depends_on": [
+        "p4-400-overprovisioning"
+      ],
+      "complexity": "MED",
+      "subtask_prompt": "TASK-403: web CostOptimization.tsx + charts từ cost-analysis API (phụ thuộc 400 backend)."
+    },
+    {
+      "id": "p4-410-self-service",
+      "depends_on": [],
+      "complexity": "MED",
+      "subtask_prompt": "TASK-410: SelfService page + components, route /self-service, JWT-scoped data only."
+    },
+    {
+      "id": "p4-411-tier-upgrade",
+      "depends_on": [
+        "p4-410-self-service"
+      ],
+      "complexity": "HIGH",
+      "subtask_prompt": "TASK-411: upgrade_requests flow team_lead → it_admin. **Không Slack DM** — thông báo qua EmailModule/templates + audit (đã excluded Slack)."
+    },
+    {
+      "id": "p4-412-lead-budget",
+      "depends_on": [],
+      "complexity": "MED",
+      "subtask_prompt": "TASK-412: PUT teams/:id/member-budgets team_lead, validate sum ≤ team budget, UI running total."
+    },
+    {
+      "id": "p4-420-policy-overrides",
+      "depends_on": [],
+      "complexity": "HIGH",
+      "subtask_prompt": "TASK-420: policy_overrides table + resolveEffectivePolicy + cron expire + UI tab Temporary Override."
+    },
+    {
+      "id": "p4-421-pii-filter",
+      "depends_on": [],
+      "complexity": "HIGH",
+      "subtask_prompt": "TASK-421: pii-filter.service.ts opt-in contentInspection per policy; regex patterns; log/warn/block."
+    },
+    {
+      "id": "p4-430-git-correlation",
+      "depends_on": [],
+      "complexity": "MED",
+      "subtask_prompt": "TASK-430: git-correlation.service.ts GitHub API optional, analytics_correlations, rate limit 1/day."
+    },
+    {
+      "id": "p4-431-analytics-dashboard",
+      "depends_on": [
+        "p4-430-git-correlation"
+      ],
+      "complexity": "MED",
+      "subtask_prompt": "TASK-431: Analytics.tsx scatter + dual axis + disclaimer banner."
+    },
+    {
+      "id": "p4-432-leaderboard",
+      "depends_on": [],
+      "complexity": "MED",
+      "subtask_prompt": "TASK-432: Leaderboard opt-in, badges, admin-curated highlights, non-punitive."
+    },
+    {
+      "id": "p4-433-executive-report",
+      "depends_on": [
+        "p4-430-git-correlation"
+      ],
+      "complexity": "HIGH",
+      "subtask_prompt": "TASK-433: executive-report.service.ts monthly PDF. **Không Slack** — gửi email EXECUTIVE_REPORT_RECIPIENTS + lưu DB (excluded Slack delivery)."
+    },
+    {
+      "id": "p4-440-token-analysis",
+      "depends_on": [],
+      "complexity": "MED",
+      "subtask_prompt": "TASK-440: token-analysis.service.ts flag high token users vs team avg, weekly report."
+    },
+    {
+      "id": "p4-441-model-suggestions",
+      "depends_on": [],
+      "complexity": "MED",
+      "subtask_prompt": "TASK-441: model-suggestions.service.ts Opus→Sonnet heuristics, admin one-click."
+    },
+    {
+      "id": "p4-450-redis-sentinel",
+      "depends_on": [
+        "t-380-k8s-manifests"
+      ],
+      "complexity": "HIGH",
+      "subtask_prompt": "TASK-450: Redis Sentinel manifests + RedisService ioredis sentinel config + failover test notes."
+    },
+    {
+      "id": "p4-451-postgres-replication",
+      "depends_on": [
+        "t-380-k8s-manifests"
+      ],
+      "complexity": "HIGH",
+      "subtask_prompt": "TASK-451: PG streaming replication manifests + read replica Prisma/read path pattern (hoặc doc nếu chưa split)."
+    },
+    {
+      "id": "p4-452-gateway-hpa",
+      "depends_on": [
+        "t-380-k8s-manifests"
+      ],
+      "complexity": "MED",
+      "subtask_prompt": "TASK-452: HPA api deployment CPU/custom metric prometheus-adapter."
+    },
+    {
+      "id": "p4-453-cloud-migration-prep",
+      "depends_on": [
+        "t-380-k8s-manifests",
+        "p4-451-postgres-replication"
+      ],
+      "complexity": "MED",
+      "subtask_prompt": "TASK-453: docs/cloud-migration-plan.md + infra/terraform skeleton cost compare."
+    },
+    {
+      "id": "p4-460-timescale-retention",
+      "depends_on": [],
+      "complexity": "MED",
+      "subtask_prompt": "TASK-460: scripts/migrations post-prisma retention policies usage_events/hourly + audit retention notes."
+    },
+    {
+      "id": "p4-461-keys-cleanup",
+      "depends_on": [],
+      "complexity": "MED",
+      "subtask_prompt": "TASK-461: keys-cleanup.service.ts weekly cron soft-delete old revoked/expired keys."
+    }
+  ]
+}

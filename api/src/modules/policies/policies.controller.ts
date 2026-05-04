@@ -10,8 +10,10 @@ import {
   HttpCode,
   HttpStatus,
   ParseUUIDPipe,
+  Put,
 } from '@nestjs/common';
-import { ApiTags, ApiOperation, ApiParam, ApiQuery } from '@nestjs/swagger';
+import { ApiTags, ApiOperation, ApiParam, ApiQuery, ApiBody } from '@nestjs/swagger';
+import { PaginationDto } from '../../common/dto/pagination.dto';
 import { UserRole } from '@prisma/client';
 import { Auth } from '../../common/decorators/auth.decorator';
 import { ApiResponse } from '../../common/dto/response.dto';
@@ -33,21 +35,27 @@ export class PoliciesController {
   }
 
   @Get()
-  @ApiOperation({ summary: 'List policies' })
+  @ApiOperation({ summary: 'List policies with pagination, search, and filters' })
   @ApiQuery({ name: 'teamId', required: false, type: String })
   @ApiQuery({ name: 'userId', required: false, type: String })
   @ApiQuery({ name: 'isActive', required: false, type: Boolean })
   async findAll(
+    @Query() pagination: PaginationDto,
     @Query('teamId') teamId?: string,
     @Query('userId') userId?: string,
     @Query('isActive') isActive?: string,
   ) {
-    const filters = {
-      ...(teamId ? { teamId } : {}),
-      ...(userId ? { userId } : {}),
+    const { policies, total } = await this.policies.findAll({
+      teamId,
+      userId,
       ...(isActive !== undefined ? { isActive: isActive === 'true' } : {}),
-    };
-    return ApiResponse.ok(await this.policies.findAll(filters));
+      search: pagination.search,
+      page: pagination.page,
+      limit: pagination.limit,
+      sortBy: pagination.sort,
+      sortOrder: pagination.order,
+    });
+    return ApiResponse.paginated(policies, total, pagination.page, pagination.limit);
   }
 
   @Get('resolve')

@@ -29,7 +29,7 @@ jobs:
           echo "${{ secrets.STAGING_KUBECONFIG }}" > "${HOME}/.kube/config"
           chmod 600 "${HOME}/.kube/config"
       - name: Apply staging manifests
-        run: kubectl apply -f infra/k8s/
+        run: kubectl apply -f infra/k8s/staging/
       - name: Roll forward API and Web images
         run: |
           kubectl set image deployment/aihub-api api="${{ secrets.CONTAINER_REGISTRY }}/aihub-api:${IMAGE_TAG}" -n aihub-staging

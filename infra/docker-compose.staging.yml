@@ -1,3 +1,6 @@
+# Staging overrides — use with dev stack:
+#   docker compose -f infra/docker-compose.dev.yml -f infra/docker-compose.staging.yml --env-file api/.env.staging up -d
+# Copy api/.env.staging.example → api/.env.staging (gitignored).
 version: "3.9"
 
 services:

@@ -39,11 +39,60 @@ curl -sf -X PUT "$APISIX_ADMIN/apisix/admin/routes/1" \
     }
   }'
 
-# Route 2: Admin API — Keycloak JWT required (aihub-gateway client for introspection)
+# Route 2: Headless AI gateway — internal API key in Authorization (Claude/Cursor).
+# MUST be higher priority than Keycloak route: openid-connect treats Bearer as JWT and rejects aihub_* keys.
 curl -sf -X PUT "$APISIX_ADMIN/apisix/admin/routes/2" \
+  -H "$AUTH" -H "Content-Type: application/json" \
+  -d '{
+    "uris": ["/api/v1/chat/completions", "/api/v1/messages"],
+    "methods": ["POST"],
+    "priority": 200,
+    "upstream_id": "1",
+    "plugins": {
+      "limit-req": {
+        "rate": 100,
+        "burst": 50,
+        "key_type": "var",
+        "key": "http_authorization",
+        "rejected_code": 429,
+        "rejected_msg": "{\"error\":{\"code\":\"RATE_LIMITED\",\"message\":\"Too many requests\"}}"
+      },
+      "prometheus": {},
+      "request-id": {}
+    }
+  }'
+
+# Route 3: SDK default base URL without /api prefix — rewrite to Nest global prefix /api/v1/chat/completions
+curl -sf -X PUT "$APISIX_ADMIN/apisix/admin/routes/3" \
+  -H "$AUTH" -H "Content-Type: application/json" \
+  -d '{
+    "uris": ["/v1/chat/completions", "/v1/messages"],
+    "methods": ["POST"],
+    "priority": 200,
+    "upstream_id": "1",
+    "plugins": {
+      "proxy-rewrite": {
+        "uri": "/api/v1/chat/completions"
+      },
+      "limit-req": {
+        "rate": 100,
+        "burst": 50,
+        "key_type": "var",
+        "key": "http_authorization",
+        "rejected_code": 429,
+        "rejected_msg": "{\"error\":{\"code\":\"RATE_LIMITED\",\"message\":\"Too many requests\"}}"
+      },
+      "prometheus": {},
+      "request-id": {}
+    }
+  }'
+
+# Route 4: Admin API — Keycloak JWT (browser / Admin Portal). Lower priority than gateway routes.
+curl -sf -X PUT "$APISIX_ADMIN/apisix/admin/routes/4" \
   -H "$AUTH" -H "Content-Type: application/json" \
   -d "{
     \"uri\": \"/api/*\",
+    \"priority\": 5,
     \"upstream_id\": \"1\",
     \"plugins\": {
       \"openid-connect\": {
@@ -59,25 +108,5 @@ curl -sf -X PUT "$APISIX_ADMIN/apisix/admin/routes/2" \
       \"request-id\": {}
     }
   }"
-
-# Route 3: Gateway /v1/* — API key handled by NestJS, APISix adds edge rate limiting
-curl -sf -X PUT "$APISIX_ADMIN/apisix/admin/routes/3" \
-  -H "$AUTH" -H "Content-Type: application/json" \
-  -d '{
-    "uri": "/v1/*",
-    "upstream_id": "1",
-    "plugins": {
-      "limit-req": {
-        "rate": 100,
-        "burst": 50,
-        "key_type": "var",
-        "key": "http_x_aihub_key",
-        "rejected_code": 429,
-        "rejected_msg": "{\"error\":{\"code\":\"RATE_LIMITED\",\"message\":\"Too many requests\"}}"
-      },
-      "prometheus": {},
-      "request-id": {}
-    }
-  }'
 
 echo "APISix routes configured."

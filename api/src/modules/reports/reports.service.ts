@@ -81,10 +81,16 @@ export class ReportsService {
     }
   }
 
-  async listMonthlyReports(limit = 12): Promise<MonthlyReportItem[]> {
+  async listMonthlyReports(
+    page = 1,
+    limit = 12,
+  ): Promise<{ reports: MonthlyReportItem[]; total: number }> {
     const useDaily = await this.canUseUsageDaily();
     const useEvents = await this.canUseUsageEvents();
-    if (!useDaily && !useEvents) return [];
+    if (!useDaily && !useEvents) return { reports: [], total: 0 };
+
+    const safeLimit  = Math.min(limit, 24);
+    const offset     = (page - 1) * safeLimit;
 
     const rows = useDaily
       ? await this.prisma.$queryRaw<Array<{ month_bucket: Date; generated_at: Date; total_spend_usd: number }>>`
@@ -95,7 +101,7 @@ export class ReportsService {
           FROM usage_daily
           GROUP BY DATE_TRUNC('month', bucket)
           ORDER BY month_bucket DESC
-          LIMIT ${limit}
+          LIMIT ${safeLimit} OFFSET ${offset}
         `
       : await this.prisma.$queryRaw<Array<{ month_bucket: Date; generated_at: Date; total_spend_usd: number }>>`
           SELECT
@@ -105,15 +111,28 @@ export class ReportsService {
           FROM usage_events
           GROUP BY DATE_TRUNC('month', created_at)
           ORDER BY month_bucket DESC
-          LIMIT ${limit}
+          LIMIT ${safeLimit} OFFSET ${offset}
         `;
 
-    return rows.map((row) => ({
-      month: row.month_bucket.toISOString().slice(0, 7),
-      generatedAt: row.generated_at.toISOString(),
-      totalSpendUsd: Number(row.total_spend_usd ?? 0),
-      status: 'ready',
-    }));
+    // Total count — count distinct months
+    const countRows = useDaily
+      ? await this.prisma.$queryRaw<[{ count: bigint }]>`
+          SELECT COUNT(DISTINCT DATE_TRUNC('month', bucket))::bigint AS count FROM usage_daily
+        `
+      : await this.prisma.$queryRaw<[{ count: bigint }]>`
+          SELECT COUNT(DISTINCT DATE_TRUNC('month', created_at))::bigint AS count FROM usage_events
+        `;
+    const total = Number(countRows[0]?.count ?? 0);
+
+    return {
+      reports: rows.map((row) => ({
+        month: row.month_bucket.toISOString().slice(0, 7),
+        generatedAt: row.generated_at.toISOString(),
+        totalSpendUsd: Number(row.total_spend_usd ?? 0),
+        status: 'ready',
+      })),
+      total,
+    };
   }
 
   async getCurrentMonthPreview(from?: Date, to?: Date): Promise<CurrentMonthReportPreview> {

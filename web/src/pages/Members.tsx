@@ -11,6 +11,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { getPaginatedEnvelope, postEnvelope, putEnvelope } from '@/lib/api';
 import { canUseCapability } from '@/lib/capabilities';
 import { useGlobalUi } from '@/contexts/GlobalUiContext';
+import { formatRelativeShort } from '@/lib/utils';
 
 interface Member {
   id: string;
@@ -18,7 +19,10 @@ interface Member {
   fullName: string;
   status: string;
   role: string;
+  updatedAt: string;
   teamMembers: Array<{ team: { id: string; name: string }; tier: string }>;
+  /** Newest active key lastUsedAt (server sends at most one row for list perf). */
+  apiKeys?: Array<{ lastUsedAt: string | null }>;
 }
 
 const TIERS = ['MEMBER', 'SENIOR', 'LEAD'] as const;
@@ -215,24 +219,21 @@ export default function Members() {
               {filteredMembers.map((member) => {
                 const primaryTeam = member.teamMembers[0];
                 const initials = member.fullName.split(' ').map((part) => part[0]).slice(0, 2).join('').toUpperCase();
-                const activity = member.status === 'ACTIVE' ? '45m ago' : member.status === 'OFFBOARDED' ? 'Inactive' : '12d ago';
+                const lastKeyUse = member.apiKeys?.[0]?.lastUsedAt ?? null;
+                const activity =
+                  member.status === 'OFFBOARDED'
+                    ? 'Offboarded'
+                    : lastKeyUse
+                      ? formatRelativeShort(lastKeyUse)
+                      : formatRelativeShort(member.updatedAt);
                 return (
                   <tr key={member.id} className="group hover:bg-white/5 transition-all cursor-crosshair border-b border-white/5">
                     <td className="px-6 py-6">
                       <div className="flex items-center gap-4">
-                        <img
-                          referrerPolicy="no-referrer"
-                          src={`https://picsum.photos/seed/${member.id}/100/100`}
-                          className="w-12 h-12 rounded-xl object-cover grayscale opacity-60 group-hover:grayscale-0 group-hover:opacity-100 transition-all shadow-xl border border-white/10"
-                          alt=""
-                          onError={(e) => {
-                            const t = e.currentTarget;
-                            t.style.display = 'none';
-                            const fallback = t.nextElementSibling as HTMLElement | null;
-                            if (fallback) fallback.style.display = 'flex';
-                          }}
-                        />
-                        <div className="w-12 h-12 rounded-xl bg-white/5 border border-white/10 items-center justify-center text-xs font-black text-primary hidden">
+                        <div
+                          className="w-12 h-12 rounded-xl bg-white/5 border border-white/10 flex items-center justify-center text-xs font-black text-primary shadow-xl"
+                          aria-hidden
+                        >
                           {initials}
                         </div>
                         <div>

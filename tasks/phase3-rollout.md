@@ -282,7 +282,7 @@
   - Notes: **Excluded from current rollout scope**. GitHub CI/CD is not used. Deployment is handled manually via runbook-driven operational process.
 
 - [x] TASK-383: Implement daily database backup job
-  - File: `infra/backup/backup.sh`, `infra/k8s/backup-cronjob.yaml`
+  - File: `infra/backup/backup.sh`, `infra/k8s/production/backup-cronjob.yaml`
   - Dependencies: TASK-380
   - Risk: high — backup là last line of defense; phải test restore
   - Estimate: M

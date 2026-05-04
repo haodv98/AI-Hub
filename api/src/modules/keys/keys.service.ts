@@ -1,10 +1,11 @@
-import { Injectable, NotFoundException, ForbiddenException, Logger } from '@nestjs/common';
+import { Injectable, NotFoundException, ForbiddenException, BadRequestException, Logger } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { RedisService } from '../../redis/redis.service';
 import { AuditService } from '../audit/audit.service';
 import {
   ApiKey,
   ApiKeyStatus,
+  AuditAction,
   Prisma,
   ProviderType,
   ProviderKeyScope,
@@ -13,6 +14,8 @@ import {
 import * as crypto from 'crypto';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { OneTimeTokenService } from '../integrations/email/one-time-token.service';
+import { UsageService } from '../usage/usage.service';
+import type { ApiKeyUsageHistoryItem } from '../usage/usage.types';
 
 const GRACE_PERIOD_HOURS = 72;
 const KEY_CACHE_PREFIX = 'apikey:hash:';
@@ -46,6 +49,7 @@ export class KeysService {
     private readonly redis: RedisService,
     private readonly audit: AuditService,
     private readonly oneTimeToken: OneTimeTokenService,
+    private readonly usage: UsageService,
   ) {}
 
   async generateKey(userId: string, actorId: string, env = 'prod'): Promise<GeneratedKey> {
@@ -113,6 +117,44 @@ export class KeysService {
     return key;
   }
 
+  async updateGatewayDefaultModel(
+    keyId: string,
+    actorId: string,
+    defaultUpstreamModel: string | null | undefined,
+  ): Promise<{ id: string; defaultUpstreamModel: string | null }> {
+    const trimmed =
+      defaultUpstreamModel === null || defaultUpstreamModel === undefined
+        ? null
+        : String(defaultUpstreamModel).trim() || null;
+    if (trimmed && trimmed.length > 200) {
+      throw new BadRequestException('defaultUpstreamModel must be at most 200 characters');
+    }
+
+    const key = await this.prisma.apiKey.findUnique({ where: { id: keyId } });
+    if (!key) throw new NotFoundException('API key not found');
+    await this.assertCanManageKey(actorId, key.userId);
+    if (key.status !== ApiKeyStatus.ACTIVE && key.status !== ApiKeyStatus.ROTATING) {
+      throw new ForbiddenException('Only active keys can be updated');
+    }
+
+    const updated = await this.prisma.apiKey.update({
+      where: { id: keyId },
+      data: { defaultUpstreamModel: trimmed },
+    });
+
+    await this.redis.del(`${KEY_CACHE_PREFIX}${key.keyHash}`);
+
+    await this.audit.log({
+      actorId,
+      action: AuditAction.KEY_GATEWAY_MODEL_UPDATE,
+      targetType: 'ApiKey',
+      targetId: keyId,
+      details: { userId: key.userId, defaultUpstreamModel: trimmed },
+    });
+
+    return { id: updated.id, defaultUpstreamModel: updated.defaultUpstreamModel };
+  }
+
   async rotateKey(keyId: string, actorId: string): Promise<GeneratedKey> {
     const oldKey = await this.prisma.apiKey.findUnique({ where: { id: keyId } });
     if (!oldKey) throw new NotFoundException('API key not found');
@@ -134,6 +176,7 @@ export class KeysService {
           keyPrefix,
           status: ApiKeyStatus.ACTIVE,
           rotatedFromId: keyId,
+          defaultUpstreamModel: oldKey.defaultUpstreamModel,
         },
       });
 
@@ -225,7 +268,13 @@ export class KeysService {
       perSeatProviderKeys.map((k) => `${k.userId}:${k.provider}`),
     );
 
-    const providers = [ProviderType.ANTHROPIC, ProviderType.OPENAI, ProviderType.GOOGLE];
+    const providers = [
+      ProviderType.ANTHROPIC,
+      ProviderType.OPENAI,
+      ProviderType.GOOGLE,
+      ProviderType.CURSOR,
+      ProviderType.OTHER,
+    ];
     const keysWithRouting: KeyWithRouting[] = keys.map((key) => ({
       ...key,
       providerRouting: providers.map((provider) => {
@@ -270,8 +319,16 @@ export class KeysService {
     return crypto.createHash('sha256').update(plaintext).digest('hex');
   }
 
+  getKeyUsageHistory(keyId: string, from: Date, to: Date): Promise<ApiKeyUsageHistoryItem[]> {
+    return this.usage.getKeyUsageHistory(keyId, from, to);
+  }
+
   private async assertCanManageKey(actorId: string, keyOwnerId: string): Promise<void> {
     if (actorId === 'system' || actorId === keyOwnerId) return;
+
+    if (!actorId || typeof actorId !== 'string') {
+      throw new ForbiddenException('Missing authenticated user identity');
+    }
 
     const actor = await this.prisma.user.findUnique({
       where: { id: actorId },

@@ -5,7 +5,8 @@ import { useForm } from 'react-hook-form';
 import { z } from 'zod';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { formatUsd } from '@/lib/utils';
-import api from '@/lib/api';
+import { getEnvelope, getPaginatedEnvelope, mapApiError, patchEnvelope, postEnvelope } from '@/lib/api';
+import { POLICY_MODEL_IDS } from '@/common/model-ids';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -33,13 +34,7 @@ interface PolicyDetail {
 
 const SCOPE_TYPES = ['org', 'team', 'role', 'individual'] as const;
 const TIERS = ['STANDARD', 'PREMIUM', 'BASIC'] as const;
-const ENGINES = {
-  Claude: ['claude-3-5-sonnet-20241022', 'claude-3-haiku-20240307'],
-  OpenAI: ['gpt-4o', 'gpt-4o-mini'],
-  Gemini: ['gemini-2.0-flash'],
-} as const;
-
-const ALL_ENGINES = Object.values(ENGINES).flat();
+const ALL_ENGINES = Object.values(POLICY_MODEL_IDS).flat();
 
 const schema = z.object({
   name: z.string().min(2, 'Name must be at least 2 characters'),
@@ -81,14 +76,17 @@ function SectionHeader({ children }: { children: React.ReactNode }) {
 function useTeams() {
   return useQuery<Team[]>({
     queryKey: ['teams'],
-    queryFn: () => api.get('/teams').then((r) => r.data.data ?? []),
+    queryFn: async () => {
+      const { data } = await getPaginatedEnvelope<Team[]>('/teams', { page: 1, limit: 200 });
+      return data ?? [];
+    },
   });
 }
 
 function usePolicyDetail(id: string | undefined) {
   return useQuery<PolicyDetail>({
     queryKey: ['policies', id],
-    queryFn: () => api.get(`/policies/${id}`).then((r) => r.data.data),
+    queryFn: () => getEnvelope<PolicyDetail>(`/policies/${id}`),
     enabled: !!id,
   });
 }
@@ -156,7 +154,7 @@ export default function PolicyEditor() {
   const watchedRpm = watch('rpmLimit');
 
   const save = useMutation({
-    mutationFn: (data: PolicyForm) => {
+    mutationFn: async (data: PolicyForm) => {
       const payload = {
         name: data.name,
         isActive: data.isActive,
@@ -182,16 +180,19 @@ export default function PolicyEditor() {
             : {}),
         },
       };
-      return isEdit
-        ? api.put(`/policies/${id}`, payload)
-        : api.post('/policies', payload);
+      if (isEdit) {
+        await patchEnvelope(`/policies/${id}`, payload);
+      } else {
+        await postEnvelope('/policies', payload);
+      }
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['policies'] });
       navigate('/policies');
     },
-    onError: (err: any) => {
-      setError('root', { message: err.response?.data?.error ?? 'Failed to save policy' });
+    onError: (err: unknown) => {
+      const mapped = mapApiError(err, 'Failed to save policy');
+      setError('root', { message: mapped.message });
     },
   });
 
@@ -343,7 +344,7 @@ export default function PolicyEditor() {
                 No selection = allow all engines. Select specific engines to restrict access.
               </p>
               <div className="space-y-4">
-                {Object.entries(ENGINES).map(([provider, models]) => (
+                {Object.entries(POLICY_MODEL_IDS).map(([provider, models]) => (
                   <div key={provider}>
                     <p className="text-xs font-medium text-muted-foreground mb-2">{provider}</p>
                     <div className="space-y-2 pl-2">

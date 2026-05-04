@@ -2,13 +2,14 @@
 import { useState } from 'react';
 import { Link } from 'react-router';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Plus, ChevronRight, Zap, X, UserPlus, Users, Shield } from 'lucide-react';
+import { Plus, ChevronRight, Zap, X, UserPlus, Users, Shield, CheckCircle2 } from 'lucide-react';
 import { AnimatePresence, motion } from 'motion/react';
 import { BarChart, Bar, ResponsiveContainer } from 'recharts';
 import { formatUsd } from '@/lib/utils';
-import { postEnvelope } from '@/lib/api';
-import api from '@/lib/api';
+import { getEnvelope, getPaginatedEnvelope, postEnvelope } from '@/lib/api';
 import { useGlobalUi } from '@/contexts/GlobalUiContext';
+import { useAuth } from '@/contexts/AuthContext';
+import { canUseCapability } from '@/lib/capabilities';
 
 interface Team {
   id: string;
@@ -29,10 +30,12 @@ interface UsageSummary {
   teamUsage: TeamUsage[];
 }
 
-function useTeams() {
-  return useQuery<Team[]>({
-    queryKey: ['teams'],
-    queryFn: () => api.get('/teams').then((r) => r.data.data ?? []),
+const TEAMS_PAGE_SIZE = 20;
+
+function useTeams(page: number, search: string) {
+  return useQuery({
+    queryKey: ['teams', page, search],
+    queryFn: () => getPaginatedEnvelope<Team[]>('/teams', { page, limit: TEAMS_PAGE_SIZE, search: search || undefined }),
   });
 }
 
@@ -44,21 +47,30 @@ function useTeamUsageSummary() {
   const toDateStr = to.toISOString().split('T')[0];
   return useQuery<UsageSummary>({
     queryKey: ['usage', 'summary', 'team-usage', fromDateStr, toDateStr],
-    queryFn: () =>
-      api
-        .get(`/usage/summary?from=${fromDateStr}&to=${toDateStr}`)
-        .then((r) => r.data.data),
+    queryFn: () => getEnvelope<UsageSummary>('/usage/summary', { from: fromDateStr, to: toDateStr }),
   });
 }
 
-const DUMMY_SIGNALS = [
-  { name: 'Alex Rivera', role: 'TAC_LEAD', seed: 'alex' },
-  { name: 'Sarah Chen', role: 'NAV_OFFICER', seed: 'sarah' },
-  { name: 'Marcus Thorne', role: 'DEFENSE', seed: 'marcus' },
-];
+interface PickerUser {
+  id: string;
+  email: string;
+  fullName: string;
+  role: string;
+  status: string;
+}
+
+function useUserPicker(search: string, enabled: boolean) {
+  return useQuery({
+    queryKey: ['users', 'picker', search],
+    queryFn: () => getPaginatedEnvelope<PickerUser[]>('/users', { page: 1, limit: 30, search: search.trim() || undefined }),
+    enabled,
+  });
+}
 
 export default function Teams() {
   const queryClient = useQueryClient();
+  const { isAdmin, isTeamLead } = useAuth();
+  const role = { isAdmin, isTeamLead };
   const [isNewTeamModalOpen, setIsNewTeamModalOpen] = useState(false);
   const [teamName, setTeamName] = useState('');
   const [teamCode, setTeamCode] = useState('');
@@ -66,13 +78,39 @@ export default function Teams() {
   const [teamBudget, setTeamBudget] = useState(5000);
   const [teamPriority, setTeamPriority] = useState<'LOW' | 'MEDIUM' | 'HIGH'>('MEDIUM');
   const [isAddMemberModalOpen, setIsAddMemberModalOpen] = useState(false);
+  const [selectedTeamId, setSelectedTeamId] = useState<string | null>(null);
   const [selectedTeamName, setSelectedTeamName] = useState('');
+  const [selectedUserId, setSelectedUserId] = useState<string | null>(null);
+  const [addMemberTier, setAddMemberTier] = useState<'MEMBER' | 'SENIOR' | 'LEAD'>('MEMBER');
   const [memberToSearch, setMemberToSearch] = useState('');
   const [mutationError, setMutationError] = useState<string | null>(null);
+  const [teamsPage, setTeamsPage] = useState(1);
+  const [teamsSearch] = useState('');
   const { pushToast } = useGlobalUi();
-  const { data: teams, isLoading, isError } = useTeams();
+  const { data: teamsResult, isLoading, isError } = useTeams(teamsPage, teamsSearch);
   const { data: usageSummary } = useTeamUsageSummary();
+  const userPicker = useUserPicker(memberToSearch, isAddMemberModalOpen && !!selectedTeamId);
+  const pickerUsers = userPicker.data?.data ?? [];
   const usageByTeamId = new Map((usageSummary?.teamUsage ?? []).map((row) => [row.teamId, row]));
+  const teams = teamsResult?.data ?? [];
+  const teamsTotalPages = Math.ceil((teamsResult?.pagination?.total ?? 0) / TEAMS_PAGE_SIZE);
+
+  const addTeamMember = useMutation({
+    mutationFn: () =>
+      postEnvelope(`/teams/${selectedTeamId}/members`, { userId: selectedUserId!, tier: addMemberTier }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['teams'] });
+      setIsAddMemberModalOpen(false);
+      setSelectedTeamId(null);
+      setSelectedUserId(null);
+      setMemberToSearch('');
+      setMutationError(null);
+      pushToast('Transmission', 'Member added to unit');
+    },
+    onError: (error) => {
+      setMutationError(error instanceof Error ? error.message : 'Failed to add member.');
+    },
+  });
 
   const createTeam = useMutation({
     mutationFn: () =>
@@ -82,7 +120,7 @@ export default function Teams() {
         monthlyBudgetUsd: teamBudget,
       }),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['teams'] });
+      queryClient.invalidateQueries({ queryKey: ['teams', teamsPage, teamsSearch] });
       setIsNewTeamModalOpen(false);
       setTeamName('');
       setTeamDescription('');
@@ -120,10 +158,6 @@ export default function Teams() {
 
   const chartData = mappedTeams.map((team) => ({ name: team.name, val: team.util ?? 0 }));
 
-  const filteredSignals = DUMMY_SIGNALS.filter(
-    (s) => !memberToSearch || s.name.toLowerCase().includes(memberToSearch.toLowerCase()),
-  );
-
   return (
     <div className="space-y-12">
       <div className="flex flex-col md:flex-row md:items-end justify-between gap-6">
@@ -141,7 +175,10 @@ export default function Teams() {
         </div>
         <button
           type="button"
-          onClick={() => setIsNewTeamModalOpen(true)}
+          onClick={() => {
+            setMutationError(null);
+            setIsNewTeamModalOpen(true);
+          }}
           className="w-full md:w-auto flex items-center justify-center gap-3 px-8 py-4 bg-primary hover:bg-primary-dim text-on-primary font-bold text-[11px] uppercase tracking-[0.2em] rounded-xl shadow-xl active:scale-95 transition-all status-glow"
         >
           <Plus className="w-4 h-4" /> Deploy Unit
@@ -209,16 +246,22 @@ export default function Teams() {
                 </td>
                 <td className="px-8 py-8 text-right">
                   <div className="flex flex-col md:flex-row items-center md:justify-end gap-2 md:gap-3 translate-x-2 group-hover:translate-x-0 opacity-0 group-hover:opacity-100 transition-all w-full md:w-auto">
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setSelectedTeamName(team.name);
-                        setIsAddMemberModalOpen(true);
-                      }}
-                      className="w-full md:w-auto inline-flex items-center gap-2 px-4 py-2 bg-primary/10 border border-primary/20 rounded-xl font-bold text-[10px] uppercase tracking-widest text-primary hover:bg-primary/20 transition-all"
-                    >
-                      <UserPlus className="w-3 h-3" /> Recruit
-                    </button>
+                    {canUseCapability(role, 'teams.addMember') && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setMutationError(null);
+                          setSelectedTeamId(team.id);
+                          setSelectedTeamName(team.name);
+                          setSelectedUserId(null);
+                          setMemberToSearch('');
+                          setIsAddMemberModalOpen(true);
+                        }}
+                        className="w-full md:w-auto inline-flex items-center gap-2 px-4 py-2 bg-primary/10 border border-primary/20 rounded-xl font-bold text-[10px] uppercase tracking-widest text-primary hover:bg-primary/20 transition-all"
+                      >
+                        <UserPlus className="w-3 h-3" /> Recruit
+                      </button>
+                    )}
                     <Link
                       to={`/teams/${team.id}`}
                       className="w-full md:w-auto inline-flex items-center gap-2 px-4 py-2 bg-white/5 border border-white/10 rounded-xl font-bold text-[10px] uppercase tracking-widest text-on-surface-variant hover:text-primary hover:border-primary transition-all"
@@ -246,6 +289,32 @@ export default function Teams() {
         </table>
         </div>
       </div>
+
+      {teamsTotalPages > 1 && (
+        <div className="flex items-center justify-between px-2">
+          <span className="text-[10px] font-bold uppercase tracking-widest text-on-surface-variant opacity-60">
+            Page {teamsPage} of {teamsTotalPages}
+          </span>
+          <div className="flex gap-2">
+            <button
+              type="button"
+              disabled={teamsPage <= 1}
+              onClick={() => setTeamsPage((p) => p - 1)}
+              className="px-4 py-2 text-[10px] font-black uppercase tracking-widest bg-white/5 border border-white/10 rounded-xl disabled:opacity-30 hover:border-primary/40 transition-all"
+            >
+              Prev
+            </button>
+            <button
+              type="button"
+              disabled={teamsPage >= teamsTotalPages}
+              onClick={() => setTeamsPage((p) => p + 1)}
+              className="px-4 py-2 text-[10px] font-black uppercase tracking-widest bg-white/5 border border-white/10 rounded-xl disabled:opacity-30 hover:border-primary/40 transition-all"
+            >
+              Next
+            </button>
+          </div>
+        </div>
+      )}
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
         <div className="col-span-1 md:col-span-2 glass-panel p-8 rounded-3xl flex flex-col justify-between">
@@ -414,7 +483,11 @@ export default function Teams() {
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
-              onClick={() => setIsAddMemberModalOpen(false)}
+              onClick={() => {
+                setIsAddMemberModalOpen(false);
+                setSelectedTeamId(null);
+                setMutationError(null);
+              }}
               className="absolute inset-0 bg-black/80 backdrop-blur-sm"
             />
             <motion.div
@@ -438,7 +511,11 @@ export default function Teams() {
                 </div>
                 <button
                   type="button"
-                  onClick={() => setIsAddMemberModalOpen(false)}
+                  onClick={() => {
+                    setIsAddMemberModalOpen(false);
+                    setSelectedTeamId(null);
+                    setMutationError(null);
+                  }}
                   className="p-2 hover:bg-white/5 rounded-lg text-on-surface-variant hover:text-white transition-all"
                 >
                   <X className="w-5 h-5" />
@@ -446,6 +523,11 @@ export default function Teams() {
               </div>
 
               <div className="space-y-6">
+                {mutationError && (
+                  <div className="text-[10px] font-bold text-error uppercase tracking-widest border border-error/30 rounded-xl px-4 py-3">
+                    {mutationError}
+                  </div>
+                )}
                 <div className="space-y-1">
                   <label className="text-[9px] font-black uppercase tracking-[0.3em] text-on-surface-variant ml-1 opacity-60">Search Personnel Registry</label>
                   <div className="relative">
@@ -454,7 +536,7 @@ export default function Teams() {
                     </span>
                     <input
                       type="text"
-                      placeholder="Enter designation or signal ID..."
+                      placeholder="Name, email, or user id…"
                       className="w-full bg-white/5 border border-white/10 rounded-xl px-12 py-3 text-xs font-bold uppercase tracking-widest focus:border-primary/40 transition-all"
                       value={memberToSearch}
                       onChange={(e) => setMemberToSearch(e.target.value)}
@@ -462,53 +544,86 @@ export default function Teams() {
                   </div>
                 </div>
 
+                <div className="space-y-1">
+                  <label className="text-[9px] font-black uppercase tracking-[0.3em] text-on-surface-variant ml-1 opacity-60">Tier in unit</label>
+                  <select
+                    value={addMemberTier}
+                    onChange={(e) => setAddMemberTier(e.target.value as 'MEMBER' | 'SENIOR' | 'LEAD')}
+                    className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-xs font-bold uppercase tracking-widest focus:border-primary/40"
+                  >
+                    <option value="MEMBER">Member</option>
+                    <option value="SENIOR">Senior</option>
+                    <option value="LEAD">Lead</option>
+                  </select>
+                </div>
+
                 <div className="space-y-3">
-                  <p className="text-[9px] font-black uppercase tracking-[0.3em] text-on-surface-variant opacity-60 ml-1">Detected Signals</p>
+                  <p className="text-[9px] font-black uppercase tracking-[0.3em] text-on-surface-variant opacity-60 ml-1">Matching users (GET /users)</p>
                   <div className="space-y-2 max-h-48 overflow-y-auto pr-2">
-                    {filteredSignals.map((person, i) => (
-                      <div
-                        key={i}
-                        className="flex items-center justify-between p-3 glass-panel rounded-xl hover:border-primary/40 transition-all group/signal cursor-pointer"
-                      >
-                        <div className="flex items-center gap-3">
-                          <img
-                            src={`https://picsum.photos/seed/${person.seed}/100/100`}
-                            className="w-8 h-8 rounded-lg grayscale group-hover/signal:grayscale-0 transition-all shadow-lg"
-                            alt=""
-                          />
-                          <div>
-                            <p className="text-[10px] font-black text-on-surface uppercase tracking-wider leading-none">{person.name}</p>
-                            <p className="text-[8px] text-primary font-mono mt-1 opacity-60">{person.role}</p>
-                          </div>
-                        </div>
+                    {userPicker.isLoading && (
+                      <p className="text-[10px] font-bold text-on-surface-variant uppercase tracking-widest opacity-50 px-2">Loading…</p>
+                    )}
+                    {userPicker.isError && (
+                      <p className="text-[10px] font-bold text-error uppercase tracking-widest px-2">Failed to load users.</p>
+                    )}
+                    {!userPicker.isLoading && !userPicker.isError && pickerUsers.length === 0 && (
+                      <p className="text-[10px] font-bold text-on-surface-variant uppercase tracking-widest opacity-50 px-2">No users found.</p>
+                    )}
+                    {pickerUsers.map((u) => {
+                      const initials = u.fullName
+                        .split(' ')
+                        .map((p) => p[0])
+                        .slice(0, 2)
+                        .join('')
+                        .toUpperCase();
+                      const selected = selectedUserId === u.id;
+                      return (
                         <button
                           type="button"
-                          className="p-2 bg-primary/10 text-primary rounded-lg opacity-0 group-hover/signal:opacity-100 transition-all scale-75 group-hover/signal:scale-100"
+                          key={u.id}
+                          onClick={() => setSelectedUserId(u.id)}
+                          className={`w-full flex items-center justify-between p-3 glass-panel rounded-xl border transition-all text-left ${
+                            selected ? 'border-primary/60 bg-primary/10' : 'border-white/10 hover:border-primary/40'
+                          }`}
                         >
-                          <Plus className="w-4 h-4" />
+                          <div className="flex items-center gap-3 min-w-0">
+                            <div className="w-8 h-8 rounded-lg bg-white/10 border border-white/10 flex items-center justify-center text-[10px] font-black text-primary flex-shrink-0">
+                              {initials}
+                            </div>
+                            <div className="min-w-0">
+                              <p className="text-[10px] font-black text-on-surface uppercase tracking-wider truncate">{u.fullName}</p>
+                              <p className="text-[8px] text-primary font-mono mt-1 opacity-60 truncate">{u.email}</p>
+                              <p className="text-[8px] text-on-surface-variant uppercase tracking-widest opacity-50">
+                                {u.role} · {u.status}
+                              </p>
+                            </div>
+                          </div>
+                          {selected && <CheckCircle2 className="w-4 h-4 text-primary flex-shrink-0" />}
                         </button>
-                      </div>
-                    ))}
+                      );
+                    })}
                   </div>
                 </div>
 
                 <div className="flex gap-4 pt-2">
                   <button
                     type="button"
-                    onClick={() => setIsAddMemberModalOpen(false)}
+                    onClick={() => {
+                      setIsAddMemberModalOpen(false);
+                      setSelectedTeamId(null);
+                      setMutationError(null);
+                    }}
                     className="flex-1 py-4 glass-panel rounded-xl text-[10px] font-black uppercase tracking-[0.3em] hover:bg-white/5 transition-all text-on-surface-variant"
                   >
                     Abort Assignment
                   </button>
                   <button
                     type="button"
-                    onClick={() => {
-                      setIsAddMemberModalOpen(false);
-                      pushToast('Transmission', 'Member assignment queued');
-                    }}
-                    className="flex-1 py-4 bg-primary text-on-primary rounded-xl text-[10px] font-black uppercase tracking-[0.3em] shadow-lg status-glow active:scale-95 transition-all"
+                    onClick={() => addTeamMember.mutate()}
+                    disabled={!selectedUserId || !selectedTeamId || addTeamMember.isPending}
+                    className="flex-1 py-4 bg-primary text-on-primary rounded-xl text-[10px] font-black uppercase tracking-[0.3em] shadow-lg status-glow active:scale-95 transition-all disabled:opacity-40"
                   >
-                    Confirm Deployment
+                    {addTeamMember.isPending ? 'Adding…' : 'Add to unit'}
                   </button>
                 </div>
               </div>

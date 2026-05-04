@@ -14,6 +14,10 @@ export interface AuditLogInput {
 export interface ListAuditLogsParams {
   q?: string;
   targetType?: string;
+  userId?: string;
+  teamId?: string;
+  from?: Date;
+  to?: Date;
   page: number;
   limit: number;
 }
@@ -51,8 +55,21 @@ export class AuditService {
       : null;
 
     const where: Prisma.AuditLogWhereInput = {
-      ...(params.targetType
-        ? { targetType: { equals: params.targetType, mode: 'insensitive' } }
+      // userId/teamId filters take precedence over generic targetType
+      ...(params.userId
+        ? { targetId: params.userId, targetType: { equals: 'USER', mode: 'insensitive' } }
+        : params.teamId
+          ? { targetId: params.teamId, targetType: { equals: 'TEAM', mode: 'insensitive' } }
+          : params.targetType
+            ? { targetType: { equals: params.targetType, mode: 'insensitive' } }
+            : {}),
+      ...(params.from || params.to
+        ? {
+            createdAt: {
+              ...(params.from ? { gte: params.from } : {}),
+              ...(params.to   ? { lte: params.to   } : {}),
+            },
+          }
         : {}),
       ...(params.q
         ? {

@@ -7,8 +7,13 @@ import { Activity, AlertTriangle, ArrowRightLeft, CheckCircle2, ChevronLeft, Dat
 import { useSearchParams } from 'react-router';
 import { PolicyScopeFilterButton } from '@/components/atoms/PolicyScopeFilterButton';
 import { PolicyToggleButton } from '@/components/atoms/PolicyToggleButton';
-import { ENGINES } from '@/common/constants';
-import api from '@/lib/api';
+import { POLICY_MODEL_IDS_FLAT } from '@/common/model-ids';
+import {
+  deleteEnvelope,
+  getPaginatedEnvelope,
+  patchEnvelope,
+  postEnvelope,
+} from '@/lib/api';
 import { useGlobalUi } from '@/contexts/GlobalUiContext';
 
 const SPARK_DATA = [
@@ -129,9 +134,8 @@ function usePolicies() {
   return useQuery<Policy[]>({
     queryKey: ['policies'],
     queryFn: async () => {
-      const response = await api.get('/policies');
-      const raw = (response.data?.data ?? []) as ApiPolicy[];
-      return raw.map(mapApiPolicy);
+      const { data: raw } = await getPaginatedEnvelope<ApiPolicy[]>('/policies', { limit: 100, page: 1 });
+      return (raw ?? []).map(mapApiPolicy);
     },
   });
 }
@@ -168,7 +172,7 @@ export default function Policies() {
 
   const togglePolicyMutation = useMutation({
     mutationFn: async ({ policyId, isActive: nextIsActive }: { policyId: string; isActive: boolean }) => {
-      await api.patch(`/policies/${policyId}`, { isActive: nextIsActive });
+      await patchEnvelope(`/policies/${policyId}`, { isActive: nextIsActive });
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['policies'] });
@@ -205,9 +209,9 @@ export default function Policies() {
       };
 
       if (selectedPolicyId) {
-        await api.patch(`/policies/${selectedPolicyId}`, payload);
+        await patchEnvelope(`/policies/${selectedPolicyId}`, payload);
       } else {
-        await api.post('/policies', payload);
+        await postEnvelope('/policies', payload);
       }
     },
     onSuccess: () => {
@@ -226,7 +230,7 @@ export default function Policies() {
 
   const deletePolicyMutation = useMutation({
     mutationFn: async (policyId: string) => {
-      await api.delete(`/policies/${policyId}`);
+      await deleteEnvelope(`/policies/${policyId}`);
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['policies'] });
@@ -517,7 +521,7 @@ export default function Policies() {
                       <div className="space-y-3">
                         <label className="text-[9px] font-black uppercase tracking-[0.3em] text-on-surface-variant opacity-60 ml-1">Authorized Compute Engines</label>
                         <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
-                          {ENGINES.map((engine) => (
+                          {POLICY_MODEL_IDS_FLAT.map((engine) => (
                             <button
                               key={engine}
                               type="button"
@@ -586,14 +590,14 @@ export default function Policies() {
                             <label className="text-[9px] font-black uppercase tracking-[0.3em] text-on-surface-variant opacity-60 ml-1">From Engine</label>
                             <select value={formState.fallback.fromModel} onChange={(event) => setFormState((prev) => ({ ...prev, fallback: { ...prev.fallback, fromModel: event.target.value } }))} className="w-full bg-white/5 border border-white/10 rounded-xl px-5 py-4 text-xs font-bold uppercase tracking-widest focus:border-primary/40 transition-all appearance-none cursor-pointer">
                               <option value="" className="bg-surface">Select Anchor</option>
-                              {ENGINES.map((e) => <option key={e} value={e} className="bg-surface">{e}</option>)}
+                              {POLICY_MODEL_IDS_FLAT.map((e) => <option key={e} value={e} className="bg-surface">{e}</option>)}
                             </select>
                           </div>
                           <div className="space-y-2">
                             <label className="text-[9px] font-black uppercase tracking-[0.3em] text-on-surface-variant opacity-60 ml-1">To Engine [Failover]</label>
                             <select value={formState.fallback.toModel} onChange={(event) => setFormState((prev) => ({ ...prev, fallback: { ...prev.fallback, toModel: event.target.value } }))} className="w-full bg-white/5 border border-white/10 rounded-xl px-5 py-4 text-xs font-bold uppercase tracking-widest focus:border-primary/40 transition-all appearance-none cursor-pointer">
                               <option value="" className="bg-surface">Select Failover</option>
-                              {ENGINES.map((e) => <option key={e} value={e} className="bg-surface">{e}</option>)}
+                              {POLICY_MODEL_IDS_FLAT.map((e) => <option key={e} value={e} className="bg-surface">{e}</option>)}
                             </select>
                           </div>
                         </motion.div>

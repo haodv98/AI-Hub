@@ -1,0 +1,12 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: aihub-api-staging-env
+  namespace: aihub-staging
+  labels:
+    app.kubernetes.io/name: aihub-api
+    environment: staging
+data:
+  NODE_ENV: staging
+  PORT: "3001"
+  LOG_LEVEL: info

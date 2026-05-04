@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { motion, AnimatePresence } from 'motion/react';
@@ -36,6 +36,21 @@ interface UsageSummaryRow {
   requestCount: number;
 }
 
+interface ApiPolicy {
+  id: string;
+  name?: string;
+  teamId?: string | null;
+  userId?: string | null;
+  tier?: string | null;
+  priority?: number;
+  isActive?: boolean;
+  allowedEngines?: string[];
+  config?: {
+    limits?: { rpm?: number; dailyTokens?: number; monthlyBudgetUsd?: number };
+    fallback?: { enabled?: boolean; thresholdPct?: number; fromModel?: string; toModel?: string };
+  };
+}
+
 interface Policy {
   id: string;
   name: string;
@@ -48,30 +63,30 @@ interface Policy {
   fallback: { enabled: boolean; threshold: number; fromModel: string; toModel: string };
 }
 
-const mockPolicies: Policy[] = [
-  {
-    id: '1',
-    name: 'Standard Operator Quota',
-    scope: 'ROLE',
-    target: 'OPERATOR',
-    priority: 10,
-    active: true,
-    allowedModels: ['GPT-4o', 'Claude-3.5-Sonnet'],
-    limits: { rpm: 60, dailyTokens: 250000, monthlyBudget: 500 },
-    fallback: { enabled: true, threshold: 85, fromModel: 'GPT-4o', toModel: 'GPT-3.5-Turbo' },
-  },
-  {
-    id: '2',
-    name: 'Neural-Ops Unrestricted',
-    scope: 'TEAM',
-    target: 'Neural-Ops',
-    priority: 50,
-    active: true,
-    allowedModels: ['GPT-4o', 'Claude-3.5-Opus', 'o1-preview'],
-    limits: { rpm: 300, dailyTokens: 5000000, monthlyBudget: 2500 },
-    fallback: { enabled: false, threshold: 90, fromModel: '', toModel: '' },
-  },
-];
+function mapApiPolicy(p: ApiPolicy): Policy {
+  const scope: Policy['scope'] = p.userId ? 'USER' : p.teamId && p.tier ? 'ROLE' : p.teamId ? 'TEAM' : 'ORG';
+  return {
+    id: p.id,
+    name: p.name ?? 'Untitled',
+    scope,
+    target: p.userId ?? p.teamId ?? 'Global',
+    priority: p.priority ?? 0,
+    active: p.isActive ?? true,
+    allowedModels: p.allowedEngines ?? [],
+    limits: {
+      rpm: p.config?.limits?.rpm ?? 60,
+      dailyTokens: p.config?.limits?.dailyTokens ?? 250000,
+      monthlyBudget: p.config?.limits?.monthlyBudgetUsd ?? 500,
+    },
+    fallback: {
+      enabled: p.config?.fallback?.enabled ?? false,
+      threshold: p.config?.fallback?.thresholdPct ?? 80,
+      fromModel: p.config?.fallback?.fromModel ?? '',
+      toModel: p.config?.fallback?.toModel ?? '',
+    },
+  };
+}
+
 
 function useTeamDetail(id: string) {
   return useQuery<TeamDetail>({
@@ -100,14 +115,44 @@ export default function TeamDetail() {
   const team = teamQuery.data;
   const usageRows = usageQuery.data;
 
+  useEffect(() => {
+    if (team) setBudgetInput(String(team.monthlyBudgetUsd ?? ''));
+  }, [team?.id, team?.monthlyBudgetUsd]);
+
   const [removeTarget, setRemoveTarget] = useState<string | null>(null);
   const [newMemberId, setNewMemberId] = useState('');
   const [newMemberTier, setNewMemberTier] = useState<'MEMBER' | 'SENIOR' | 'LEAD'>('MEMBER');
   const [budgetInput, setBudgetInput] = useState('');
   const [tierTarget, setTierTarget] = useState<{ userId: string; tier: 'MEMBER' | 'SENIOR' | 'LEAD' } | null>(null);
   const [mutationError, setMutationError] = useState<string | null>(null);
-  const [attachedPolicies, setAttachedPolicies] = useState<Policy[]>([mockPolicies[0]]);
   const [isAttachModalOpen, setIsAttachModalOpen] = useState(false);
+
+  const teamPoliciesQuery = useQuery<Policy[]>({
+    queryKey: ['teams', id, 'policies'],
+    queryFn: async () => {
+      const raw = await getEnvelope<ApiPolicy[]>(`/teams/${id}/policies`);
+      return (raw ?? []).map(mapApiPolicy);
+    },
+    enabled: !!id,
+  });
+
+  const effectivePolicyQuery = useQuery<Policy | null>({
+    queryKey: ['teams', id, 'policies', 'effective'],
+    queryFn: async () => {
+      const raw = await getEnvelope<ApiPolicy | null>(`/teams/${id}/policies/effective`);
+      return raw ? mapApiPolicy(raw) : null;
+    },
+    enabled: !!id,
+  });
+
+  const allPoliciesQuery = useQuery<Policy[]>({
+    queryKey: ['policies', 'all'],
+    queryFn: async () => {
+      const raw = await getEnvelope<ApiPolicy[]>('/policies', { limit: 100 });
+      return (raw ?? []).map(mapApiPolicy);
+    },
+    enabled: isAttachModalOpen,
+  });
 
   const removeMember = useMutation({
     mutationFn: (userId: string) => deleteEnvelope(`/teams/${id}/members/${userId}`),
@@ -123,7 +168,10 @@ export default function TeamDetail() {
 
   const updateBudget = useMutation({
     mutationFn: () => putEnvelope(`/teams/${id}`, { monthlyBudgetUsd: Number(budgetInput) }),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['teams', id] }); setBudgetInput(''); setMutationError(null); },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['teams', id] });
+      setMutationError(null);
+    },
     onError: (error) => { setMutationError(error instanceof Error ? error.message : 'Failed to update budget.'); },
   });
 
@@ -134,17 +182,30 @@ export default function TeamDetail() {
     onError: (error) => { setMutationError(error instanceof Error ? error.message : 'Failed to change member tier.'); },
   });
 
+  const attachPolicy = useMutation({
+    mutationFn: (policyId: string) => postEnvelope(`/teams/${id}/policies/${policyId}`),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['teams', id, 'policies'] });
+      qc.invalidateQueries({ queryKey: ['teams', id, 'policies', 'effective'] });
+      setIsAttachModalOpen(false);
+      setMutationError(null);
+    },
+    onError: (error) => { setMutationError(error instanceof Error ? error.message : 'Failed to attach policy.'); },
+  });
+
+  const detachPolicy = useMutation({
+    mutationFn: (policyId: string) => deleteEnvelope(`/teams/${id}/policies/${policyId}`),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['teams', id, 'policies'] });
+      qc.invalidateQueries({ queryKey: ['teams', id, 'policies', 'effective'] });
+      setMutationError(null);
+    },
+    onError: (error) => { setMutationError(error instanceof Error ? error.message : 'Failed to detach policy.'); },
+  });
+
   const totalCost = (usageRows ?? []).reduce((sum, r) => sum + r.costUsd, 0);
-
-  const effectivePolicy = attachedPolicies.length > 0
-    ? attachedPolicies.reduce((prev, current) => (prev.priority > current.priority ? prev : current))
-    : null;
-
-  const handleDetach = (policyId: string) => setAttachedPolicies(attachedPolicies.filter((p) => p.id !== policyId));
-  const handleAttach = (policy: Policy) => {
-    if (!attachedPolicies.find((p) => p.id === policy.id)) setAttachedPolicies([...attachedPolicies, policy]);
-    setIsAttachModalOpen(false);
-  };
+  const attachedPolicies = teamPoliciesQuery.data ?? [];
+  const effectivePolicy = effectivePolicyQuery.data ?? null;
 
   if (teamQuery.isLoading) {
     return (
@@ -417,7 +478,7 @@ export default function TeamDetail() {
                       <p className="text-[10px] font-black text-on-surface uppercase tracking-tight">{p.name}</p>
                       <p className="text-[8px] font-mono text-primary uppercase mt-0.5 opacity-60">PRIORITY: {p.priority}</p>
                     </div>
-                    <button onClick={() => handleDetach(p.id)} className="p-1.5 text-on-surface-variant hover:text-error transition-all">
+                    <button onClick={() => detachPolicy.mutate(p.id)} className="p-1.5 text-on-surface-variant hover:text-error transition-all">
                       <Trash2 className="w-3.5 h-3.5" />
                     </button>
                   </div>
@@ -427,7 +488,7 @@ export default function TeamDetail() {
                       <span className="text-[8px] font-black text-on-surface-variant uppercase tracking-widest opacity-60">{p.scope}: {p.target}</span>
                     </div>
                     <button
-                      onClick={() => handleDetach(p.id)}
+                      onClick={() => detachPolicy.mutate(p.id)}
                       className="text-[8px] font-black uppercase tracking-widest text-error opacity-0 group-hover:opacity-100 transition-all hover:underline"
                     >
                       DETACH
@@ -514,11 +575,13 @@ export default function TeamDetail() {
                 </button>
               </div>
               <div className="space-y-3 max-h-96 overflow-y-auto pr-2">
-                {mockPolicies.map((p) => (
+                {allPoliciesQuery.isLoading ? (
+                  <p className="text-[9px] font-bold uppercase tracking-widest text-on-surface-variant opacity-60 text-center py-6">Loading policies...</p>
+                ) : (allPoliciesQuery.data ?? []).map((p) => (
                   <button
                     key={p.id}
-                    onClick={() => handleAttach(p)}
-                    disabled={!!attachedPolicies.find((a) => a.id === p.id)}
+                    onClick={() => attachPolicy.mutate(p.id)}
+                    disabled={!!attachedPolicies.find((a) => a.id === p.id) || attachPolicy.isPending}
                     className={`w-full p-4 glass-panel rounded-2xl flex items-center justify-between border-transparent transition-all group relative ${
                       attachedPolicies.find((a) => a.id === p.id)
                         ? 'opacity-40 grayscale cursor-not-allowed'

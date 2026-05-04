@@ -6,15 +6,13 @@ deployment:
   role: traditional
   role_traditional:
     config_provider: etcd
+  # Must match etcd client URLs in infra/docker-compose.dev.yml (Bitnami etcd: HTTP only).
+  # For production etcd over TLS, use https://... hosts and add deployment.etcd.tls (cert, key, verify).
   etcd:
     host:
-      - https://etcd:2379
+      - http://etcd:2379
     prefix: /apisix
     timeout: 30
-    tls:
-      cert: /usr/local/apisix/conf/ssl/etcd-client.crt
-      key: /usr/local/apisix/conf/ssl/etcd-client.key
-      verify: true
   admin:
     admin_key_required: true
     allow_admin:

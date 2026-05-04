@@ -5,6 +5,8 @@ export interface AuthUser {
   teamId?: string | null;
   tier?: string;
   roles: string[];
+  /** When set on the API key, gateway uses this LiteLLM model id instead of the client `model`. */
+  defaultUpstreamModel?: string | null;
 }
 
 declare global {

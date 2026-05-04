@@ -4,14 +4,15 @@ import { AnimatePresence, motion } from 'motion/react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   Key, Plus, RotateCcw, Search, Trash2,
-  Copy, Check, AlertTriangle, X, ShieldAlert, History, Terminal,
+  Copy, Check, AlertTriangle, X, ShieldAlert, History, Terminal, Settings2,
 } from 'lucide-react';
 import { StatusBadge } from '@/components/ui/StatusBadge';
 import { KeyRevealModal } from '@/components/keys/KeyRevealModal';
 import { TableSkeleton } from '@/components/ui/LoadingSkeleton';
 import { SegmentedFilterButton } from '@/components/atoms/SegmentedFilterButton';
 import { formatDate } from '@/lib/utils';
-import api from '@/lib/api';
+import { POLICY_MODEL_IDS_FLAT } from '@/common/model-ids';
+import { getEnvelope, getPaginatedEnvelope, patchEnvelope, postEnvelope } from '@/lib/api';
 import { useGlobalUi } from '@/contexts/GlobalUiContext';
 
 interface ApiKey {
@@ -20,6 +21,8 @@ interface ApiKey {
   status: string;
   lastUsedAt: string | null;
   createdAt: string;
+  /** When set, gateway ignores client `model` and uses this LiteLLM id (e.g. Gemini for Claude Code). */
+  defaultUpstreamModel: string | null;
   user: { fullName: string; email: string };
   providerRouting: Array<{
     provider: 'ANTHROPIC' | 'OPENAI' | 'GOOGLE';
@@ -28,39 +31,28 @@ interface ApiKey {
   }>;
 }
 
-interface PaginatedResponse<T> {
-  data: T[];
-  meta?: {
-    pagination?: {
-      total: number;
-      page: number;
-      limit: number;
-      pages: number;
-    };
-  };
+interface UsageEvent {
+  timestamp: string;
+  endpoint: string;
+  status: string;
+  tokens: number;
+  model: string;
 }
 
 const UUID_REGEX =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
-const MOCK_USAGE_HISTORY = [
-  { timestamp: '2024-03-24 14:20:11', endpoint: '/v1/chat/completions', status: 'SUCCESS', tokens: 1420, model: 'GPT-4o' },
-  { timestamp: '2024-03-24 14:15:05', endpoint: '/v1/embeddings', status: 'SUCCESS', tokens: 512, model: 'text-embedding-3-small' },
-  { timestamp: '2024-03-24 13:50:42', endpoint: '/v1/chat/completions', status: 'FAILURE', tokens: 0, model: 'Claude-3.5-Sonnet' },
-  { timestamp: '2024-03-24 12:10:33', endpoint: '/v1/images/generations', status: 'SUCCESS', tokens: 0, model: 'DALL-E 3' },
-  { timestamp: '2024-03-24 11:45:12', endpoint: '/v1/chat/completions', status: 'SUCCESS', tokens: 850, model: 'GPT-4o' },
-];
 
 function useKeys() {
-  return useQuery<PaginatedResponse<ApiKey>>({
+  return useQuery({
     queryKey: ['keys'],
-    queryFn: () => api.get('/keys').then((r) => r.data),
+    queryFn: () => getPaginatedEnvelope<ApiKey[]>('/keys', { page: 1, limit: 50 }),
   });
 }
 
 export default function Keys() {
   const qc = useQueryClient();
-  const { data: keysResponse, isLoading, isError } = useKeys();
+  const { data: keysPage, isLoading, isError } = useKeys();
   const [issueUserId, setIssueUserId] = useState('');
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState<'ALL' | 'ACTIVE' | 'REVOKED'>('ALL');
@@ -71,8 +63,21 @@ export default function Keys() {
   const [revokeConfirm, setRevokeConfirm] = useState<ApiKey | null>(null);
   const [rotateConfirm, setRotateConfirm] = useState<ApiKey | null>(null);
   const [usageHistoryKey, setUsageHistoryKey] = useState<ApiKey | null>(null);
+  const [gatewayModelKey, setGatewayModelKey] = useState<ApiKey | null>(null);
+  const [gatewayModelDraft, setGatewayModelDraft] = useState('');
   const [revealedKey, setRevealedKey] = useState<string | null>(null);
   const [mutationError, setMutationError] = useState<string | null>(null);
+  const [usageDateRange] = useState(() => {
+    const to = new Date();
+    const from = new Date(to.getTime() - 7 * 24 * 60 * 60 * 1000);
+    return { from: from.toISOString(), to: to.toISOString() };
+  });
+
+  const usageHistoryQuery = useQuery<UsageEvent[]>({
+    queryKey: ['key-usage', usageHistoryKey?.id, usageDateRange],
+    queryFn: () => getEnvelope<UsageEvent[]>(`/keys/${usageHistoryKey!.id}/usage`, usageDateRange),
+    enabled: !!usageHistoryKey,
+  });
 
   const { pushToast } = useGlobalUi();
 
@@ -83,7 +88,7 @@ export default function Keys() {
   };
 
   const revoke = useMutation({
-    mutationFn: async (id: string) => api.post(`/keys/${id}/revoke`),
+    mutationFn: async (id: string) => postEnvelope<{ revoked: boolean }>(`/keys/${id}/revoke`),
     onMutate: () => { setMutationError(null); },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['keys'] });
@@ -95,8 +100,8 @@ export default function Keys() {
 
   const rotate = useMutation({
     mutationFn: async (id: string) => {
-      const response = await api.post(`/keys/${id}/rotate`);
-      const plaintext = response.data?.data?.plaintext;
+      const body = await postEnvelope<{ plaintext?: string }>(`/keys/${id}/rotate`);
+      const plaintext = body?.plaintext;
       if (typeof plaintext !== 'string') throw new Error('Missing plaintext in rotation response');
       return plaintext;
     },
@@ -110,11 +115,25 @@ export default function Keys() {
     onError: () => { setMutationError('Failed to rotate key. Please retry.'); },
   });
 
+  const saveGatewayModel = useMutation({
+    mutationFn: async ({ id, model }: { id: string; model: string | null }) =>
+      patchEnvelope<{ id: string; defaultUpstreamModel: string | null }>(`/keys/${id}/gateway-model`, {
+        defaultUpstreamModel: model,
+      }),
+    onMutate: () => { setMutationError(null); },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['keys'] });
+      setGatewayModelKey(null);
+      pushToast('Transmission', 'Gateway model override saved');
+    },
+    onError: () => { setMutationError('Failed to save gateway model override.'); },
+  });
+
   const issueKey = useMutation({
     mutationFn: async (userId: string) => {
       setMutationError(null);
-      const response = await api.post(`/keys?userId=${encodeURIComponent(userId)}`);
-      const plaintext = response.data?.data?.plaintext;
+      const body = await postEnvelope<{ plaintext?: string }>(`/keys?userId=${encodeURIComponent(userId)}`);
+      const plaintext = body?.plaintext;
       if (typeof plaintext !== 'string') throw new Error('Missing plaintext in issue key response');
       return plaintext;
     },
@@ -127,7 +146,7 @@ export default function Keys() {
     onError: () => { setMutationError('Failed to issue key. Please verify userId and retry.'); },
   });
 
-  const filteredKeys = (keysResponse?.data ?? []).filter((key) => {
+  const filteredKeys = (keysPage?.data ?? []).filter((key) => {
     const userName = key.user?.fullName ?? '';
     const keyPrefix = key.keyPrefix ?? '';
     const matchesSearch =
@@ -139,9 +158,9 @@ export default function Keys() {
 
   const issueUserIdTrimmed = issueUserId.trim();
   const isValidIssueUserId = UUID_REGEX.test(issueUserIdTrimmed);
-  const totalKeys = keysResponse?.meta?.pagination?.total ?? (keysResponse?.data ?? []).length;
-  const activeKeys = (keysResponse?.data ?? []).filter((k) => k.status === 'ACTIVE').length;
-  const revokedKeys = (keysResponse?.data ?? []).filter((k) => k.status === 'REVOKED').length;
+  const totalKeys = keysPage?.pagination?.total ?? (keysPage?.data ?? []).length;
+  const activeKeys = (keysPage?.data ?? []).filter((k) => k.status === 'ACTIVE').length;
+  const revokedKeys = (keysPage?.data ?? []).filter((k) => k.status === 'REVOKED').length;
 
   return (
     <div className="space-y-12">
@@ -183,11 +202,6 @@ export default function Keys() {
         </div>
       </div>
 
-      <div className="glass-panel p-4 rounded-2xl text-[10px] font-bold uppercase tracking-widest text-on-surface-variant opacity-70">
-        LiteLLM does not create user keys in its database for this flow. Gateway resolves provider keys from Vault:
-        <span className="text-primary"> PER_SEAT first, fallback to SHARED</span>.
-      </div>
-
       <div className="grid grid-cols-1 md:grid-cols-12 gap-4">
         <div className="md:col-span-8 glass-panel p-4 rounded-xl flex items-center gap-3 border-white/10 focus-within:border-primary/40 transition-all">
           <Search className="text-primary w-4 h-4 ml-2" />
@@ -226,10 +240,10 @@ export default function Keys() {
       )}
 
       {isLoading ? (
-        <TableSkeleton rows={6} cols={6} />
+        <TableSkeleton rows={6} cols={8} />
       ) : (
         <div className="glass-panel rounded-3xl overflow-x-auto border border-white/5">
-          <table className="w-full min-w-[980px] text-left">
+          <table className="w-full min-w-[1100px] text-left">
             <thead>
               <tr className="bg-white/5">
                 <th scope="col" className="px-8 py-6 text-[10px] font-black uppercase tracking-[0.2em] text-on-surface-variant opacity-50">Token Designation</th>
@@ -238,6 +252,7 @@ export default function Keys() {
                 <th scope="col" className="px-8 py-6 text-[10px] font-black uppercase tracking-[0.2em] text-on-surface-variant opacity-50">Calibrated</th>
                 <th scope="col" className="px-8 py-6 text-[10px] font-black uppercase tracking-[0.2em] text-on-surface-variant opacity-50">Last Signal</th>
                 <th scope="col" className="px-8 py-6 text-[10px] font-black uppercase tracking-[0.2em] text-on-surface-variant opacity-50">Provider Routing</th>
+                <th scope="col" className="px-8 py-6 text-[10px] font-black uppercase tracking-[0.2em] text-on-surface-variant opacity-50">Gateway model</th>
                 <th scope="col" className="px-8 py-6 text-[10px] font-black uppercase tracking-[0.2em] text-on-surface-variant opacity-50 text-right">Operations</th>
               </tr>
             </thead>
@@ -291,8 +306,26 @@ export default function Keys() {
                       ))}
                     </div>
                   </td>
+                  <td className="px-8 py-8 max-w-[200px]">
+                    <span className="text-[10px] font-mono text-on-surface-variant break-all">
+                      {key.defaultUpstreamModel ?? '—'}
+                    </span>
+                  </td>
                   <td className="px-8 py-8 text-right">
                     <div className="flex items-center justify-end gap-3 opacity-0 group-hover:opacity-100 transition-all translate-x-2 group-hover:translate-x-0">
+                      <button
+                        type="button"
+                        aria-label={`Set gateway model for key ${key.keyPrefix}`}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setGatewayModelKey(key);
+                          setGatewayModelDraft(key.defaultUpstreamModel ?? '');
+                        }}
+                        disabled={key.status !== 'ACTIVE' && key.status !== 'ROTATING'}
+                        className="p-2 bg-white/5 hover:bg-white/10 text-on-surface-variant hover:text-primary rounded-lg transition-all disabled:opacity-20 disabled:pointer-events-none"
+                      >
+                        <Settings2 className="w-4 h-4" />
+                      </button>
                       <button
                         type="button"
                         aria-label={`Rotate key ${key.keyPrefix}`}
@@ -317,7 +350,7 @@ export default function Keys() {
               ))}
               {filteredKeys.length === 0 && (
                 <tr>
-                  <td colSpan={7} className="px-8 py-14 text-center text-[10px] font-bold uppercase tracking-widest text-on-surface-variant opacity-60">
+                  <td colSpan={8} className="px-8 py-14 text-center text-[10px] font-bold uppercase tracking-widest text-on-surface-variant opacity-60">
                     No access keys match the current query.
                   </td>
                 </tr>
@@ -543,6 +576,89 @@ export default function Keys() {
         )}
       </AnimatePresence>
 
+      {/* Gateway model override (Claude Code → Gemini, etc.) */}
+      <AnimatePresence>
+        {gatewayModelKey && (
+          <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => !saveGatewayModel.isPending && setGatewayModelKey(null)}
+              className="absolute inset-0 bg-surface/80 backdrop-blur-sm"
+            />
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 20 }}
+              className="relative w-full max-w-lg glass-panel p-8 rounded-3xl border-primary/20 shadow-2xl"
+            >
+              <div className="flex justify-between items-start mb-6">
+                <div>
+                  <h2 className="text-xl font-black uppercase tracking-tight">Gateway model override</h2>
+                  <p className="text-[10px] font-bold text-on-surface-variant uppercase tracking-[0.2em] mt-1 opacity-70">
+                    LiteLLM model id for key <span className="text-primary font-mono">{gatewayModelKey.keyPrefix}</span>
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => !saveGatewayModel.isPending && setGatewayModelKey(null)}
+                  className="text-on-surface-variant hover:text-white transition-colors"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+              <p className="text-[11px] text-on-surface-variant mb-4 leading-relaxed">
+                Claude Code always sends Anthropic-style <code className="text-primary">claude-*</code> model names.
+                Set a Gemini (or other) LiteLLM id here so traffic uses your per-seat Google key. Policy{' '}
+                <span className="text-on-surface font-semibold">allowed engines</span> must include this exact id (or be empty).
+              </p>
+              <label className="text-[9px] font-black uppercase tracking-[0.25em] text-on-surface-variant opacity-50 ml-1 block mb-2">
+                Model id (empty = use client model)
+              </label>
+              <input
+                type="text"
+                list="gateway-model-suggestions"
+                value={gatewayModelDraft}
+                onChange={(e) => setGatewayModelDraft(e.target.value)}
+                placeholder="e.g. gemini-2.0-flash"
+                className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-xs font-mono focus:border-primary/40 focus:ring-0 transition-all mb-2"
+              />
+              <datalist id="gateway-model-suggestions">
+                {POLICY_MODEL_IDS_FLAT.map((m) => (
+                  <option key={m} value={m} />
+                ))}
+              </datalist>
+              <p className="text-[9px] text-on-surface-variant opacity-60 mb-6">
+                There is no <code className="text-on-surface">gemini-3-flash</code> id in LiteLLM; use names such as{' '}
+                <code className="text-primary">gemini-2.0-flash</code> unless your provider documents otherwise.
+              </p>
+              <div className="flex gap-3">
+                <button
+                  type="button"
+                  onClick={() => !saveGatewayModel.isPending && setGatewayModelKey(null)}
+                  className="flex-1 py-3 text-[10px] font-black uppercase tracking-widest text-on-surface-variant hover:text-on-surface transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  disabled={saveGatewayModel.isPending}
+                  onClick={() =>
+                    saveGatewayModel.mutate({
+                      id: gatewayModelKey.id,
+                      model: gatewayModelDraft.trim() === '' ? null : gatewayModelDraft.trim(),
+                    })}
+                  className="flex-1 py-3 bg-primary text-on-primary font-black text-[10px] uppercase tracking-widest rounded-xl hover:brightness-110 disabled:opacity-40"
+                >
+                  {saveGatewayModel.isPending ? 'Saving…' : 'Save'}
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
       {/* Usage History Modal */}
       <AnimatePresence>
         {usageHistoryKey && (
@@ -606,7 +722,19 @@ export default function Keys() {
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-white/5">
-                      {MOCK_USAGE_HISTORY.map((log, i) => (
+                      {usageHistoryQuery.isLoading ? (
+                        <tr>
+                          <td colSpan={4} className="px-6 py-8 text-center text-[9px] font-bold uppercase tracking-widest text-on-surface-variant opacity-60">
+                            Loading...
+                          </td>
+                        </tr>
+                      ) : (usageHistoryQuery.data ?? []).length === 0 ? (
+                        <tr>
+                          <td colSpan={4} className="px-6 py-8 text-center text-[9px] font-bold uppercase tracking-widest text-on-surface-variant opacity-60">
+                            No usage events in the last 7 days.
+                          </td>
+                        </tr>
+                      ) : (usageHistoryQuery.data ?? []).map((log, i) => (
                         <tr key={i} className="hover:bg-white/5 transition-colors">
                           <td className="px-6 py-4 font-mono text-[9px] text-on-surface-variant">{log.timestamp}</td>
                           <td className="px-6 py-4">

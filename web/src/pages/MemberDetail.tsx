@@ -5,9 +5,9 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { motion, AnimatePresence } from 'motion/react';
 import {
   BadgeCheck, ChevronLeft, CircleX, Cloud, Cpu, Lock,
-  History, UserCog, Users, UserPlus, UserMinus, Settings2, Terminal,
+  History, UserCog, Users,
   KeyRound, X, Info, Calendar, Copy, Check, AlertTriangle, ShieldAlert,
-  Plus,
+  Plus, Globe, Terminal,
 } from 'lucide-react';
 import { BarChart, Bar, Cell, ResponsiveContainer } from 'recharts';
 import { StatusBadge } from '@/components/ui/StatusBadge';
@@ -15,10 +15,10 @@ import { StatCard } from '@/components/ui/StatCard';
 import { TableSkeleton } from '@/components/ui/LoadingSkeleton';
 import { ErrorPanel } from '@/components/ui/RequestState';
 import { useAuth } from '@/contexts/AuthContext';
-import { formatUsd, formatNumber, formatDate } from '@/lib/utils';
+import { formatUsd, formatNumber, formatDate, formatRelativeShort } from '@/lib/utils';
 import { canUseCapability } from '@/lib/capabilities';
 import { monthToDateRange } from '@/lib/date-range';
-import { getEnvelope, postEnvelope } from '@/lib/api';
+import { getEnvelope, getPaginatedEnvelope, postEnvelope } from '@/lib/api';
 
 interface ApiKey {
   id: string;
@@ -28,12 +28,30 @@ interface ApiKey {
   createdAt: string;
 }
 
+/** Matches GET /policies/resolve (Nest EffectivePolicy). */
+interface EffectivePolicyApi {
+  allowedEngines: string[];
+  config: {
+    limits: { rpm?: number; dailyTokens?: number; monthlyBudgetUsd?: number };
+  };
+  resolvedFrom: string;
+}
+
 interface EffectivePolicy {
+  name?: string;
   allowedEngines: string[];
   limits: {
     rpm?: number;
     dailyTokens?: number;
     monthlyBudgetUsd?: number;
+  };
+}
+
+function mapEffectivePolicy(raw: EffectivePolicyApi): EffectivePolicy {
+  return {
+    name: raw.resolvedFrom.replace(/-/g, ' '),
+    allowedEngines: raw.allowedEngines ?? [],
+    limits: raw.config?.limits ?? {},
   };
 }
 
@@ -46,7 +64,7 @@ interface MemberDetail {
   teamMembers: Array<{ team: { id: string; name: string }; tier: string }>;
   apiKeys?: ApiKey[];
   providerKeys?: Array<{
-    provider: 'ANTHROPIC' | 'OPENAI' | 'GOOGLE';
+    provider: 'ANTHROPIC' | 'OPENAI' | 'GOOGLE' | 'CURSOR' | 'OTHER';
     scope: 'PER_SEAT' | 'SHARED';
     vaultPath: string;
     assignedAt: string;
@@ -69,6 +87,28 @@ interface AuditEntry {
   color: string;
 }
 
+interface AuditLogRow {
+  id: string;
+  timestamp: string;
+  actor: { name: string; email: string };
+  action: string;
+  targetType: string;
+  targetId: string;
+  details: Record<string, unknown>;
+}
+
+function mapAuditLog(row: AuditLogRow): AuditEntry {
+  const isError = row.action.includes('REVOKE') || row.action.includes('REMOVE') || row.action.includes('DELETE') || row.action.includes('OFFBOARD');
+  return {
+    date: row.timestamp.replace('T', ' ').slice(0, 19),
+    action: row.action,
+    actor: row.actor.name,
+    desc: String(row.details?.description ?? row.details?.event ?? row.action.replace(/_/g, ' ')),
+    icon: History,
+    color: isError ? 'text-error' : 'text-primary',
+  };
+}
+
 function useMemberDetail(id: string) {
   return useQuery<MemberDetail>({
     queryKey: ['members', id],
@@ -89,17 +129,29 @@ function useMemberUsage(id: string) {
 function useEffectivePolicy(id: string) {
   return useQuery<EffectivePolicy | null>({
     queryKey: ['policies', 'resolve', id],
-    queryFn: () =>
-      getEnvelope<EffectivePolicy>(`/policies/resolve`, { userId: id }).catch(() => null),
+    queryFn: async () => {
+      try {
+        const raw = await getEnvelope<EffectivePolicyApi>(`/policies/resolve`, { userId: id });
+        return mapEffectivePolicy(raw);
+      } catch {
+        return null;
+      }
+    },
     enabled: !!id,
   });
 }
 
-const getFutureDate = (months: number) => {
-  const d = new Date();
-  d.setMonth(d.getMonth() + months);
-  return d.toISOString().split('T')[0];
-};
+function useAuditLogs(userId?: string, teamId?: string) {
+  return useQuery<AuditLogRow[]>({
+    queryKey: ['audit-logs', userId, teamId],
+    queryFn: async () => {
+      const { data } = await getPaginatedEnvelope<AuditLogRow[]>('/audit-logs', { userId, teamId, limit: 20 });
+      return data;
+    },
+    enabled: !!(userId || teamId),
+  });
+}
+
 
 export default function MemberDetail() {
   const qc = useQueryClient();
@@ -112,26 +164,63 @@ export default function MemberDetail() {
   const { data: usageRows, isLoading: usageLoading } = usageQuery;
   const { data: policy } = useEffectivePolicy(id!);
 
-  const [provider, setProvider] = useState<'ANTHROPIC' | 'OPENAI' | 'GOOGLE'>('ANTHROPIC');
+  type ProviderOption = 'ANTHROPIC' | 'OPENAI' | 'GOOGLE' | 'CURSOR' | 'OTHER';
+  const [provider, setProvider] = useState<ProviderOption>('ANTHROPIC');
   const [apiKey, setApiKey] = useState('');
+  const [gatewayUrl, setGatewayUrl] = useState('');
+  const [testResult, setTestResult] = useState<'success' | 'error' | null>(null);
   const [mutationError, setMutationError] = useState<string | null>(null);
   const [isAssignModalOpen, setIsAssignModalOpen] = useState(false);
+
+  const providersList: { id: ProviderOption; name: string; desc: string; icon: React.ElementType; color: string }[] = [
+    { id: 'ANTHROPIC', name: 'Anthropic Claude', desc: 'Opus, Sonnet, Haiku', icon: Cloud, color: 'text-orange-400' },
+    { id: 'OPENAI', name: 'OpenAI / Codex', desc: 'GPT-4o, Codex Models', icon: Terminal, color: 'text-green-400' },
+    { id: 'GOOGLE', name: 'Google Gemini', desc: 'Pro, Flash, Ultra', icon: Globe, color: 'text-blue-400' },
+    { id: 'CURSOR', name: 'Cursor XL', desc: 'IDE Specialized Stream', icon: Cpu, color: 'text-indigo-400' },
+    { id: 'OTHER', name: 'Other LLM', desc: 'Custom API Endpoint', icon: Plus, color: 'text-on-surface-variant' },
+  ];
+
+  const testConnectionMutation = useMutation({
+    mutationFn: () =>
+      postEnvelope<{ success: boolean; latencyMs: number; details: string; error: string | null }>(
+        `/users/${id}/provider-keys/test`,
+        { provider, apiKey, ...(provider === 'OTHER' && gatewayUrl ? { gatewayUrl } : {}) },
+      ),
+    onSuccess: (data) => {
+      setTestResult(data.success ? 'success' : 'error');
+      setTimeout(() => setTestResult(null), 3000);
+    },
+    onError: () => setTestResult('error'),
+  });
   const [generatedKey, setGeneratedKey] = useState<string | null>(null);
   const [isKeyFlowOpen, setIsKeyFlowOpen] = useState(false);
   const [copied, setCopied] = useState(false);
   const [expMonths, setExpMonths] = useState<number>(1);
   const [auditTab, setAuditTab] = useState<'PERSONAL' | 'TEAM'>('PERSONAL');
 
+  const primaryTeamId = member?.teamMembers?.[0]?.team?.id;
+  const personalAuditQuery = useAuditLogs(id);
+  const teamAuditQuery = useAuditLogs(undefined, primaryTeamId);
+
   const assignPerSeatKey = useMutation({
-    mutationFn: () => postEnvelope(`/users/${id}/provider-keys/assign`, { provider, apiKey }),
-    onSuccess: () => {
-      const newKey = `aihub_${provider.toLowerCase()}_${Math.random().toString(36).substring(2, 10)}`;
-      setGeneratedKey(newKey);
+    mutationFn: () =>
+      postEnvelope<{ vaultPath: string; issuedApiKey?: string }>(`/users/${id}/provider-keys/assign`, {
+        provider,
+        apiKey,
+        ...(provider === 'OTHER' && gatewayUrl ? { gatewayUrl } : {}),
+      }),
+    onSuccess: (data) => {
       setApiKey('');
       setIsAssignModalOpen(false);
-      setIsKeyFlowOpen(true);
       qc.invalidateQueries({ queryKey: ['members', id] });
       setMutationError(null);
+      if (data.issuedApiKey) {
+        setGeneratedKey(data.issuedApiKey);
+        setIsKeyFlowOpen(true);
+      } else {
+        setGeneratedKey(null);
+        setIsKeyFlowOpen(false);
+      }
     },
     onError: (error) => {
       setMutationError(error instanceof Error ? error.message : 'Failed to assign provider key.');
@@ -153,21 +242,8 @@ export default function MemberDetail() {
     [usageRows],
   );
 
-  const localAuditTrail: AuditEntry[] = [
-    { date: '2024-04-22 10:15:30', action: 'POLICY_ATTACH', actor: 'Admin', desc: 'Attached [Standard_Ops] protocol overlay', icon: BadgeCheck, color: 'text-primary' },
-    { date: '2024-04-21 09:44:12', action: 'KEY_ROTATE', actor: 'SYSTEM_DAEMON', desc: 'Automatic rotation of secondary operational key', icon: KeyRound, color: 'text-primary' },
-    { date: '2024-04-19 16:20:05', action: 'ACCESS_GRANT', actor: 'Admin', desc: 'Granted seat assignment for provider cluster', icon: Cloud, color: 'text-primary' },
-    { date: '2024-04-15 11:30:55', action: 'SIGNAL_MOD', actor: 'System', desc: 'Modified signal intensity threshold (+15%)', icon: Terminal, color: 'text-primary' },
-    { date: '2024-04-10 08:00:00', action: 'MEMBER_JOIN', actor: 'SYSTEM_DAEMON', desc: 'Initial neural handshake established', icon: UserCog, color: 'text-primary' },
-  ];
-
-  const teamAuditTrail: AuditEntry[] = [
-    { date: '2024-04-23 14:05:22', action: 'TEAM_POLICY_UPDATE', actor: 'Admin', desc: 'Updated collective throughput quota', icon: Settings2, color: 'text-primary' },
-    { date: '2024-04-22 11:30:10', action: 'MEMBER_ADDED', actor: 'Admin', desc: 'Integrated new member into cluster', icon: UserPlus, color: 'text-primary' },
-    { date: '2024-04-20 15:45:00', action: 'RESOURCE_ALLOC', actor: 'SYSTEM_DAEMON', desc: 'Auto-scaled cluster allocation (+3 units)', icon: Cpu, color: 'text-primary' },
-    { date: '2024-04-18 09:12:33', action: 'MEMBER_REMOVED', actor: 'Admin', desc: 'Severed neural link for decommissioned member', icon: UserMinus, color: 'text-error' },
-    { date: '2024-04-12 16:20:15', action: 'TEAM_QUOTA_RESET', actor: 'SYSTEM_DAEMON', desc: 'Monthly data transmission bucket reset', icon: History, color: 'text-primary' },
-  ];
+  const localAuditTrail: AuditEntry[] = (personalAuditQuery.data ?? []).map(mapAuditLog);
+  const teamAuditTrail: AuditEntry[] = (teamAuditQuery.data ?? []).map(mapAuditLog);
 
   if (isLoading) {
     return (
@@ -180,7 +256,7 @@ export default function MemberDetail() {
 
   if (!member) return null;
 
-  const primaryTeam = member.teamMembers[0];
+  const primaryTeam = member.teamMembers?.[0];
 
   return (
     <div className="space-y-8 pb-12 overflow-hidden">
@@ -318,7 +394,7 @@ export default function MemberDetail() {
           <div className="flex flex-col h-full">
             <div className="grid grid-cols-4 text-[9px] font-black text-on-surface-variant uppercase tracking-[0.4em] opacity-40 mb-6 px-2">
               <span>DESIGNATION</span>
-              <span>CALIBRATED</span>
+              <span>LAST SIGNAL</span>
               <span>STATUS</span>
               <span className="text-right">OPS</span>
             </div>
@@ -331,7 +407,9 @@ export default function MemberDetail() {
                 {(member.apiKeys ?? []).map((key) => (
                   <div key={key.id} className="grid grid-cols-4 items-center px-2 py-3 hover:bg-white/5 rounded-xl transition-all group/row">
                     <span className="font-mono text-[10px] text-primary font-bold group-hover/row:translate-x-1 transition-transform">{key.keyPrefix}</span>
-                    <span className="text-[9px] text-on-surface-variant opacity-60 font-mono">{formatDate(key.createdAt)}</span>
+                    <span className="text-[9px] text-on-surface-variant opacity-60 font-mono">
+                      {key.lastUsedAt ? formatRelativeShort(key.lastUsedAt) : `issued ${formatDate(key.createdAt)}`}
+                    </span>
                     <StatusBadge status={key.status} />
                     <span className="text-right text-[9px] text-on-surface-variant opacity-40 uppercase tracking-widest font-black">Managed</span>
                   </div>
@@ -592,9 +670,9 @@ export default function MemberDetail() {
               initial={{ opacity: 0, scale: 0.95, y: 20 }}
               animate={{ opacity: 1, scale: 1, y: 0 }}
               exit={{ opacity: 0, scale: 0.95, y: 20 }}
-              className="relative w-full max-w-xl glass-panel p-8 rounded-3xl border-primary/20 accent-border shadow-2xl"
+              className="relative w-full max-w-xl glass-panel rounded-3xl border-primary/20 accent-border shadow-2xl flex flex-col max-h-[90vh]"
             >
-              <div className="flex justify-between items-start mb-8">
+              <div className="flex justify-between items-start p-8 pb-0 shrink-0">
                 <div>
                   <h2 className="text-2xl font-black uppercase tracking-tight">Assign Provider Key</h2>
                   <p className="text-[10px] font-bold text-primary uppercase tracking-[0.2em] mt-1 italic">Policy-Driven Cluster Integration</p>
@@ -603,41 +681,136 @@ export default function MemberDetail() {
                   <X className="w-5 h-5" />
                 </button>
               </div>
-              <div className="space-y-8">
-                <div className="grid grid-cols-2 gap-6">
-                  <div className="space-y-3">
-                    <label className="text-[9px] font-black uppercase tracking-[0.3em] text-on-surface-variant opacity-50 ml-1">AI Provider</label>
-                    <select
-                      value={provider}
-                      onChange={(e) => setProvider(e.target.value as 'ANTHROPIC' | 'OPENAI' | 'GOOGLE')}
-                      className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-xs font-bold uppercase tracking-widest focus:border-primary/40 focus:ring-0 transition-all appearance-none cursor-pointer"
+
+              <div className="overflow-y-auto p-8 pt-6 space-y-8">
+                {/* Provider card grid */}
+                <div>
+                  <h3 className="text-[10px] font-black uppercase tracking-[0.3em] text-on-surface-variant opacity-50 mb-4 ml-1">Select AI Provider</h3>
+                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                    {providersList.map((p) => {
+                      const Icon = p.icon;
+                      const isSelected = provider === p.id;
+                      return (
+                        <motion.button
+                          key={p.id}
+                          whileHover={{ scale: 1.02 }}
+                          whileTap={{ scale: 0.98 }}
+                          onClick={() => setProvider(p.id)}
+                          className={`p-4 rounded-2xl border text-left transition-all relative overflow-hidden group
+                            ${isSelected
+                              ? 'bg-primary/20 border-primary/40 shadow-[0_0_20px_rgba(56,189,248,0.1)]'
+                              : 'bg-white/5 border-white/10 hover:border-white/20'}`}
+                        >
+                          <div className="flex flex-col gap-3 relative z-10">
+                            <div className={`p-2 w-fit rounded-xl bg-white/5 border border-white/10 ${isSelected ? p.color : 'text-on-surface-variant'}`}>
+                              <Icon className="w-5 h-5" />
+                            </div>
+                            <div>
+                              <h4 className={`text-[11px] font-black uppercase tracking-tight ${isSelected ? 'text-on-surface' : 'text-on-surface-variant group-hover:text-on-surface'}`}>
+                                {p.name}
+                              </h4>
+                              <p className="text-[8px] font-bold text-on-surface-variant opacity-40 uppercase tracking-widest mt-0.5">
+                                {p.desc}
+                              </p>
+                            </div>
+                          </div>
+                          {isSelected && (
+                            <motion.div
+                              layoutId="provider-check"
+                              className="absolute top-3 right-3 w-4 h-4 rounded-full bg-primary flex items-center justify-center"
+                            >
+                              <Check className="w-2.5 h-2.5 text-on-primary" />
+                            </motion.div>
+                          )}
+                        </motion.button>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* Gateway URL — only for Other LLM */}
+                <AnimatePresence>
+                  {provider === 'OTHER' && (
+                    <motion.div
+                      initial={{ opacity: 0, height: 0, y: -10 }}
+                      animate={{ opacity: 1, height: 'auto', y: 0 }}
+                      exit={{ opacity: 0, height: 0, y: -10 }}
+                      className="space-y-3 overflow-hidden"
                     >
-                      <option className="bg-surface" value="OPENAI">OpenAI</option>
-                      <option className="bg-surface" value="ANTHROPIC">Anthropic</option>
-                      <option className="bg-surface" value="GOOGLE">Google</option>
-                    </select>
-                  </div>
-                  <div className="space-y-3">
-                    <label className="text-[9px] font-black uppercase tracking-[0.3em] text-on-surface-variant opacity-50 ml-1 flex items-center gap-2">
-                      Applied Policy <Info className="w-3 h-3 text-primary opacity-60" />
-                    </label>
-                    <div className="p-3 bg-primary/5 border border-primary/20 rounded-xl text-[10px] font-black text-primary uppercase tracking-widest">
-                      [Standard_Ops]
-                    </div>
-                  </div>
-                </div>
+                      <div className="flex justify-between items-end ml-1">
+                        <label className="text-[9px] font-black uppercase tracking-[0.3em] text-on-surface-variant opacity-50 italic">
+                          Gateway URL
+                        </label>
+                      </div>
+                      <div className="relative">
+                        <Globe className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-primary opacity-40" />
+                        <input
+                          type="text"
+                          placeholder="https://api.your-gateway.com/v1"
+                          value={gatewayUrl}
+                          onChange={(e) => setGatewayUrl(e.target.value)}
+                          className="w-full bg-white/5 border border-white/10 rounded-xl px-12 py-4 text-xs font-mono text-on-surface focus:border-primary/40 focus:ring-1 focus:ring-primary/20 transition-all placeholder:opacity-30"
+                        />
+                      </div>
+                    </motion.div>
+                  )}
+                </AnimatePresence>
 
+                {/* API Key input + Test button */}
                 <div className="space-y-3">
-                  <label className="text-[9px] font-black uppercase tracking-[0.3em] text-on-surface-variant opacity-50 ml-1">Provider API Key</label>
-                  <input
-                    type="password"
-                    placeholder="Paste seat API key"
-                    value={apiKey}
-                    onChange={(e) => setApiKey(e.target.value)}
-                    className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-xs font-mono focus:border-primary/40 focus:ring-0 transition-all"
-                  />
+                  <div className="flex justify-between items-end ml-1">
+                    <label className="text-[9px] font-black uppercase tracking-[0.3em] text-on-surface-variant opacity-50 italic">
+                      Provider Key <span className="text-primary">[{provider}]</span>
+                    </label>
+                    <span className="text-[8px] font-bold text-on-surface-variant opacity-30 uppercase tracking-widest">External Credential Source</span>
+                  </div>
+                  <div className="flex gap-3">
+                    <div className="relative flex-1">
+                      <Lock className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-primary opacity-40" />
+                      <input
+                        type="password"
+                        placeholder="Enter external API key..."
+                        value={apiKey}
+                        onChange={(e) => setApiKey(e.target.value)}
+                        className="w-full bg-white/5 border border-white/10 rounded-xl px-12 py-4 text-xs font-mono text-on-surface focus:border-primary/40 focus:ring-1 focus:ring-primary/20 transition-all placeholder:opacity-30"
+                      />
+                    </div>
+                    {apiKey && (
+                      <button
+                        onClick={() => testConnectionMutation.mutate()}
+                        disabled={testConnectionMutation.isPending}
+                        className={`px-6 rounded-xl border font-black text-[9px] uppercase tracking-widest transition-all flex items-center gap-2 whitespace-nowrap
+                          ${testResult === 'success' ? 'bg-primary/20 border-primary text-primary' : testResult === 'error' ? 'bg-error/20 border-error text-error' : 'bg-white/5 border-white/10 text-on-surface-variant hover:border-white/20'}`}
+                      >
+                        {testConnectionMutation.isPending ? (
+                          <motion.div animate={{ rotate: 360 }} transition={{ repeat: Infinity, duration: 1 }}>
+                            <History className="w-4 h-4" />
+                          </motion.div>
+                        ) : testResult === 'success' ? (
+                          <Check className="w-4 h-4" />
+                        ) : (
+                          <Terminal className="w-4 h-4" />
+                        )}
+                        {testConnectionMutation.isPending ? 'Testing...' : testResult === 'success' ? 'Ready' : testResult === 'error' ? 'Failed' : 'Test'}
+                      </button>
+                    )}
+                  </div>
                 </div>
 
+                {/* Applied policy */}
+                <div className="space-y-3">
+                  <label className="text-[9px] font-black uppercase tracking-[0.3em] text-on-surface-variant opacity-50 ml-1 flex items-center gap-2">
+                    Applied Protocol Logic <Info className="w-3 h-3 text-primary opacity-60" />
+                  </label>
+                  <div className="p-4 bg-primary/5 border border-primary/20 rounded-2xl flex items-center justify-between">
+                    <span className="text-[10px] font-black text-primary uppercase tracking-widest">
+                      {policy?.name ? `[${policy.name}]` : '[Standard_Ops]'}
+                    </span>
+                    <span className="text-[9px] font-bold text-on-surface-variant opacity-40 uppercase tracking-widest">Resolved System Policy</span>
+                  </div>
+                </div>
+
+                {/* Expiration */}
                 <div className="space-y-4">
                   <div className="flex items-center gap-2 mb-2">
                     <Calendar className="w-4 h-4 text-primary" />
@@ -649,28 +822,33 @@ export default function MemberDetail() {
                         key={opt.label}
                         type="button"
                         onClick={() => setExpMonths(opt.val)}
-                        className={`py-2.5 border rounded-lg text-[9px] font-black uppercase tracking-widest transition-all active:scale-95 ${expMonths === opt.val ? 'bg-primary/20 border-primary text-primary' : 'bg-white/5 border-white/10 hover:border-primary/40'}`}
+                        className={`py-3 border rounded-xl text-[9px] font-black uppercase tracking-widest transition-all active:scale-95
+                          ${expMonths === opt.val ? 'bg-primary/20 border-primary text-primary' : 'bg-white/5 border-white/10 hover:border-primary/40'}`}
                       >
                         {opt.label}
                       </button>
                     ))}
                   </div>
-                  <p className="text-[9px] font-mono text-on-surface-variant opacity-40 ml-1">
-                    Expires: {getFutureDate(expMonths)}
-                  </p>
                 </div>
 
+                {/* Security notice */}
                 <div className="p-5 bg-primary/5 border border-primary/20 rounded-2xl flex gap-4">
                   <ShieldAlert className="text-primary w-6 h-6 flex-shrink-0" />
                   <p className="text-[11px] font-bold text-on-surface-variant leading-relaxed uppercase tracking-wide">
-                    System will generate a unique internal hash linked to the provider key. This hash must be used by the member to authorize against internal nodes.
+                    The system will wrap your provider key with a unique internal hash.
+                    The original key is encrypted at rest using AES-256-GCM.
                   </p>
                 </div>
+
+                {mutationError && <p className="text-[10px] text-error font-bold">{mutationError}</p>}
 
                 <button
                   onClick={() => assignPerSeatKey.mutate()}
                   disabled={!apiKey.trim() || assignPerSeatKey.isPending}
-                  className="w-full py-5 bg-primary text-on-primary font-black text-[12px] uppercase tracking-[0.3em] rounded-xl shadow-xl hover:brightness-110 active:scale-[0.98] transition-all status-glow mt-4 flex items-center justify-center gap-3 disabled:opacity-50"
+                  className={`w-full py-5 font-black text-[12px] uppercase tracking-[0.3em] rounded-xl shadow-xl transition-all flex items-center justify-center gap-3 mt-4
+                    ${!apiKey.trim() || assignPerSeatKey.isPending
+                      ? 'bg-white/5 text-on-surface-variant opacity-40 cursor-not-allowed border border-white/10'
+                      : 'bg-primary text-on-primary hover:brightness-110 active:scale-[0.98] status-glow'}`}
                 >
                   <KeyRound className="w-4 h-4" /> {assignPerSeatKey.isPending ? 'Processing...' : 'Finalize & Issue Key'}
                 </button>

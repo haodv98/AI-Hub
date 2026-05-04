@@ -2,7 +2,7 @@
 import { useQuery } from '@tanstack/react-query';
 import { FileText, RefreshCw } from 'lucide-react';
 import { EmptyState, ErrorPanel } from '@/components/ui/RequestState';
-import { getEnvelope } from '@/lib/api';
+import { getEnvelope, getPaginatedEnvelope } from '@/lib/api';
 import { formatUsd } from '@/lib/utils';
 
 interface MonthlyReport {
@@ -22,12 +22,15 @@ interface Preview {
 export default function Reports() {
   const reportsQuery = useQuery<MonthlyReport[]>({
     queryKey: ['reports', 'list'],
-    queryFn: () => getEnvelope('/reports?limit=12'),
+    queryFn: async () => {
+      const { data } = await getPaginatedEnvelope<MonthlyReport[]>('/reports', { page: 1, limit: 12 });
+      return data ?? [];
+    },
   });
 
   const previewQuery = useQuery<Preview>({
     queryKey: ['reports', 'preview-current-month'],
-    queryFn: () => getEnvelope('/reports/preview/current-month'),
+    queryFn: () => getEnvelope<Preview>('/reports/preview/current-month'),
   });
 
   return (
@@ -43,28 +46,37 @@ export default function Reports() {
         </div>
       </div>
 
-      {(reportsQuery.isError || previewQuery.isError) && (
+      {reportsQuery.isError && (
         <ErrorPanel
-          message="Failed to load reports."
-          onRetry={() => {
-            reportsQuery.refetch();
-            previewQuery.refetch();
-          }}
+          message="Failed to load monthly report snapshots."
+          onRetry={() => void reportsQuery.refetch()}
+        />
+      )}
+      {previewQuery.isError && (
+        <ErrorPanel
+          message="Failed to load current-month preview."
+          onRetry={() => void previewQuery.refetch()}
         />
       )}
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         <div className="glass-panel rounded-2xl p-5">
           <p className="text-[10px] font-black uppercase tracking-[0.2em] text-on-surface-variant opacity-60">Current Month</p>
-          <p className="text-2xl font-black mt-2">{previewQuery.data?.month ?? '--'}</p>
+          <p className="text-2xl font-black mt-2">
+            {previewQuery.isLoading ? '…' : previewQuery.isError ? '—' : previewQuery.data?.month ?? '—'}
+          </p>
         </div>
         <div className="glass-panel rounded-2xl p-5">
           <p className="text-[10px] font-black uppercase tracking-[0.2em] text-on-surface-variant opacity-60">Spend MTD</p>
-          <p className="text-2xl font-black mt-2">{formatUsd(previewQuery.data?.totalSpendUsd ?? 0)}</p>
+          <p className="text-2xl font-black mt-2">
+            {previewQuery.isLoading ? '…' : previewQuery.isError ? '—' : formatUsd(previewQuery.data?.totalSpendUsd ?? 0)}
+          </p>
         </div>
         <div className="glass-panel rounded-2xl p-5">
           <p className="text-[10px] font-black uppercase tracking-[0.2em] text-on-surface-variant opacity-60">Requests MTD</p>
-          <p className="text-2xl font-black mt-2">{previewQuery.data?.totalRequests ?? 0}</p>
+          <p className="text-2xl font-black mt-2">
+            {previewQuery.isLoading ? '…' : previewQuery.isError ? '—' : previewQuery.data?.totalRequests ?? 0}
+          </p>
         </div>
       </div>
 
@@ -74,7 +86,7 @@ export default function Reports() {
             <FileText className="w-5 h-5 text-primary" />
             Monthly Reports
           </h3>
-          {(reportsQuery.isLoading || previewQuery.isLoading) && (
+          {(reportsQuery.isFetching || previewQuery.isFetching) && (
             <span className="text-xs text-on-surface-variant flex items-center gap-2">
               <RefreshCw className="w-4 h-4 animate-spin" /> Syncing...
             </span>
@@ -91,7 +103,14 @@ export default function Reports() {
             </tr>
           </thead>
           <tbody className="divide-y divide-white/5">
-            {(reportsQuery.data ?? []).map((report) => (
+            {reportsQuery.isLoading && (
+              <tr>
+                <td colSpan={4} className="px-8 py-8 text-xs text-on-surface-variant font-bold uppercase tracking-widest">
+                  Loading report snapshots…
+                </td>
+              </tr>
+            )}
+            {!reportsQuery.isLoading && (reportsQuery.data ?? []).map((report) => (
               <tr key={report.month} className="hover:bg-white/5">
                 <td className="px-8 py-5 text-xs font-black uppercase tracking-widest">{report.month}</td>
                 <td className="px-8 py-5 text-xs text-on-surface-variant">
@@ -105,7 +124,7 @@ export default function Reports() {
                 </td>
               </tr>
             ))}
-            {!reportsQuery.isLoading && (reportsQuery.data?.length ?? 0) === 0 && (
+            {!reportsQuery.isLoading && !reportsQuery.isError && (reportsQuery.data?.length ?? 0) === 0 && (
               <tr>
                 <td colSpan={4} className="px-8 py-8">
                   <EmptyState message="No report snapshots available yet." />

@@ -1,5 +1,5 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import { ForbiddenException, HttpException, HttpStatus } from '@nestjs/common';
+import { BadRequestException, ForbiddenException, HttpException, HttpStatus } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { GatewayService, UserContext } from './gateway.service';
 import { PrismaService } from '../../prisma/prisma.service';
@@ -392,6 +392,26 @@ describe('GatewayService', () => {
     test.each(cases)('model %s → provider %s', async (model, expectedProvider) => {
       await service.handleRequest(testUser, { model });
       expect(vault.getProviderKey).toHaveBeenCalledWith(expectedProvider);
+    });
+  });
+
+  describe('defaultUpstreamModel (API key override)', () => {
+    it('uses override for LiteLLM body and provider resolution', async () => {
+      const u: UserContext = {
+        ...testUser,
+        defaultUpstreamModel: 'gemini-2.0-flash',
+      };
+      await service.handleRequest(u, { model: 'claude-sonnet-4-20250514', messages: [] });
+      expect(mockedAxios.post).toHaveBeenCalledWith(
+        expect.any(String),
+        expect.objectContaining({ model: 'gemini-2.0-flash' }),
+        expect.any(Object),
+      );
+      expect(vault.getProviderKey).toHaveBeenCalledWith('google');
+    });
+
+    it('throws when model missing and no override', async () => {
+      await expect(service.handleRequest(testUser, { messages: [] })).rejects.toBeInstanceOf(BadRequestException);
     });
   });
 });

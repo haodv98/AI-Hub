@@ -42,6 +42,7 @@ export class ApiKeyGuard implements CanActivate {
       teamId: user.teamMembers[0]?.teamId || null,
       tier: user.teamMembers[0]?.tier || 'MEMBER',
       roles: [user.role.toLowerCase()],
+      defaultUpstreamModel: apiKey.defaultUpstreamModel ?? null,
     };
 
     return true;

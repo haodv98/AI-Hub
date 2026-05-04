@@ -1,7 +1,8 @@
-import { Controller, Get, Post, Put, Delete, Param, Body, Request, HttpCode, HttpStatus } from '@nestjs/common';
+import { Controller, Get, Post, Put, Delete, Param, Query, Body, Request, HttpCode, HttpStatus } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiParam, ApiBody } from '@nestjs/swagger';
 import { Auth } from '../../common/decorators/auth.decorator';
 import { ApiResponse } from '../../common/dto/response.dto';
+import { PaginationDto } from '../../common/dto/pagination.dto';
 import { TeamsService, CreateTeamDto, UpdateTeamDto } from './teams.service';
 import { UserRole, TeamMemberTier } from '@prisma/client';
 
@@ -12,9 +13,16 @@ export class TeamsController {
 
   @Get()
   @Auth(UserRole.IT_ADMIN, UserRole.SUPER_ADMIN)
-  @ApiOperation({ summary: 'List all teams' })
-  async list() {
-    return ApiResponse.ok(await this.teams.findAll());
+  @ApiOperation({ summary: 'List teams with pagination, search, and sorting' })
+  async list(@Query() pagination: PaginationDto) {
+    const { teams, total } = await this.teams.findAll({
+      page: pagination.page,
+      limit: pagination.limit,
+      search: pagination.search,
+      sortBy: pagination.sort,
+      sortOrder: pagination.order,
+    });
+    return ApiResponse.paginated(teams, total, pagination.page, pagination.limit);
   }
 
   @Get(':id')
@@ -88,5 +96,52 @@ export class TeamsController {
     @Request() req: any,
   ) {
     return ApiResponse.ok(await this.teams.changeTier(teamId, userId, tier, req.user.id));
+  }
+
+  // ── Policy attachment routes (effective MUST come before :policyId) ────────
+
+  @Get(':id/policies/effective')
+  @Auth(UserRole.IT_ADMIN, UserRole.SUPER_ADMIN, UserRole.TEAM_LEAD)
+  @ApiOperation({ summary: 'Get effective (highest priority active) policy for a team' })
+  @ApiParam({ name: 'id', description: 'Team ID' })
+  async getEffectivePolicy(@Param('id') teamId: string) {
+    return ApiResponse.ok(await this.teams.getEffectivePolicy(teamId));
+  }
+
+  @Get(':id/policies')
+  @Auth(UserRole.IT_ADMIN, UserRole.SUPER_ADMIN, UserRole.TEAM_LEAD)
+  @ApiOperation({ summary: 'List policies attached to a team' })
+  @ApiParam({ name: 'id', description: 'Team ID' })
+  async getTeamPolicies(@Param('id') teamId: string) {
+    return ApiResponse.ok(await this.teams.getTeamPolicies(teamId));
+  }
+
+  @Post(':id/policies/:policyId')
+  @Auth(UserRole.IT_ADMIN, UserRole.SUPER_ADMIN)
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Attach a policy to a team' })
+  @ApiParam({ name: 'id', description: 'Team ID' })
+  @ApiParam({ name: 'policyId', description: 'Policy ID' })
+  async attachPolicy(
+    @Param('id') teamId: string,
+    @Param('policyId') policyId: string,
+    @Request() req: any,
+  ) {
+    return ApiResponse.ok(await this.teams.attachPolicy(teamId, policyId, req.user.id));
+  }
+
+  @Delete(':id/policies/:policyId')
+  @Auth(UserRole.IT_ADMIN, UserRole.SUPER_ADMIN)
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Detach a policy from a team' })
+  @ApiParam({ name: 'id', description: 'Team ID' })
+  @ApiParam({ name: 'policyId', description: 'Policy ID' })
+  async detachPolicy(
+    @Param('id') teamId: string,
+    @Param('policyId') policyId: string,
+    @Request() req: any,
+  ) {
+    await this.teams.detachPolicy(teamId, policyId, req.user.id);
+    return ApiResponse.ok({ detached: true });
   }
 }

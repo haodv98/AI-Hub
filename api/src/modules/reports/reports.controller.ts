@@ -1,8 +1,9 @@
 import { Controller, Get, Query } from '@nestjs/common';
-import { ApiOperation, ApiQuery, ApiTags } from '@nestjs/swagger';
+import { ApiOperation, ApiTags } from '@nestjs/swagger';
 import { UserRole } from '@prisma/client';
 import { Auth } from '../../common/decorators/auth.decorator';
 import { ApiResponse } from '../../common/dto/response.dto';
+import { PaginationDto } from '../../common/dto/pagination.dto';
 import { ReportsService } from './reports.service';
 
 @ApiTags('reports')
@@ -12,12 +13,10 @@ export class ReportsController {
   constructor(private readonly reports: ReportsService) {}
 
   @Get()
-  @ApiOperation({ summary: 'List monthly reports' })
-  @ApiQuery({ name: 'limit', required: false, type: Number })
-  async list(@Query('limit') limitRaw?: string) {
-    const parsed = Number(limitRaw ?? 12);
-    const limit = Number.isFinite(parsed) && parsed > 0 ? Math.min(parsed, 24) : 12;
-    return ApiResponse.ok(await this.reports.listMonthlyReports(limit));
+  @ApiOperation({ summary: 'List monthly reports with pagination' })
+  async list(@Query() pagination: PaginationDto) {
+    const { reports, total } = await this.reports.listMonthlyReports(pagination.page, pagination.limit);
+    return ApiResponse.paginated(reports, total, pagination.page, pagination.limit);
   }
 
   @Get('preview/current-month')

@@ -103,3 +103,12 @@ export interface UsageExportSummary {
   byTeam: Array<{ teamName: string; costUsd: number; requestCount: number }>;
   byProvider: Array<{ provider: string; costUsd: number; requestCount: number }>;
 }
+
+/** Rows returned for admin key usage drawer (`GET /keys/:id/usage`). */
+export interface ApiKeyUsageHistoryItem {
+  timestamp: string;
+  endpoint: string;
+  status: string;
+  tokens: number;
+  model: string;
+}

@@ -1,4 +1,4 @@
-import { Injectable, OnModuleInit, Logger } from '@nestjs/common';
+import { BadGatewayException, Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import * as NodeVault from 'node-vault';
 
@@ -41,6 +41,8 @@ export class VaultService implements OnModuleInit {
     } else {
       throw new Error('Vault credentials not configured. Set VAULT_TOKEN or VAULT_ROLE_ID+VAULT_SECRET_ID');
     }
+
+    this.logger.log(`Vault KV engine mount for aihub paths: "${this.kvMount()}" (override with VAULT_KV_MOUNT)`);
   }
 
   async getProviderKey(provider: 'anthropic' | 'openai' | 'google'): Promise<string> {
@@ -49,12 +51,17 @@ export class VaultService implements OnModuleInit {
   }
 
   async writeSecret(path: string, data: Record<string, unknown>): Promise<void> {
-    const isKvV2Path = path.startsWith('kv/');
     const resolvedPath = this.resolveKvV2Path(path);
-    if (isKvV2Path) {
-      await this.vault.write(resolvedPath, { data });
-    } else {
-      await this.vault.write(resolvedPath, data);
+    const isKvV2Path = this.isKvV2AihubPath(path);
+    try {
+      if (isKvV2Path) {
+        await this.vault.write(resolvedPath, { data });
+      } else {
+        await this.vault.write(resolvedPath, data);
+      }
+    } catch (err: unknown) {
+      this.maybeThrowVaultRouteHelp(err, path, resolvedPath, 'write');
+      throw err;
     }
 
     for (const field of Object.keys(data)) {
@@ -70,8 +77,17 @@ export class VaultService implements OnModuleInit {
       return cached.value;
     }
 
-    const result = await this.vault.read(this.resolveKvV2Path(path));
-    const value = result.data?.data?.[field] ?? result.data?.[field];
+    let result: unknown;
+    try {
+      result = await this.vault.read(this.resolveKvV2Path(path));
+    } catch (err: unknown) {
+      const resolved = this.resolveKvV2Path(path);
+      this.maybeThrowVaultRouteHelp(err, path, resolved, 'read');
+      throw err;
+    }
+    const envelope = result as { data?: { data?: Record<string, unknown> } & Record<string, unknown> };
+    const raw = envelope.data?.data?.[field] ?? envelope.data?.[field];
+    const value = typeof raw === 'string' ? raw : raw != null ? String(raw) : '';
 
     if (!value) {
       throw new Error(`Secret not found: ${path}#${field}`);
@@ -81,10 +97,53 @@ export class VaultService implements OnModuleInit {
     return value;
   }
 
+  /** KV secrets engine mount (path prefix), without trailing slash. Default matches `infra/vault/init.sh`. */
+  private kvMount(): string {
+    return (this.config.get<string>('VAULT_KV_MOUNT') ?? 'kv').replace(/\/$/, '');
+  }
+
+  /**
+   * DB and services store the logical prefix `kv/...`. Remap to the real mount
+   * when operators use e.g. `secret/` (older docs) or a non-default engine path.
+   */
+  private remountLogicalPath(path: string): string {
+    if (path.startsWith('kv/')) {
+      return `${this.kvMount()}/${path.slice('kv/'.length)}`;
+    }
+    return path;
+  }
+
+  private isKvV2AihubPath(logicalPath: string): boolean {
+    const p = this.remountLogicalPath(logicalPath);
+    return p.startsWith(`${this.kvMount()}/`);
+  }
+
   private resolveKvV2Path(path: string): string {
-    if (!path.startsWith('kv/')) return path;
-    if (path.startsWith('kv/data/')) return path;
-    return path.replace(/^kv\//, 'kv/data/');
+    const p = this.remountLogicalPath(path);
+    const mount = this.kvMount();
+    if (!p.startsWith(`${mount}/`)) return p;
+    if (p.startsWith(`${mount}/data/`)) return p;
+    return `${mount}/data/${p.slice(mount.length + 1)}`;
+  }
+
+  /** If Vault returns "no handler for route", throw HTTP 502 with remediation; otherwise no-op. */
+  private maybeThrowVaultRouteHelp(
+    err: unknown,
+    logicalPath: string,
+    resolvedPath: string,
+    op: 'read' | 'write',
+  ): void {
+    const msg = err instanceof Error ? err.message : String(err);
+    if (!/no handler for route|route entry not found/i.test(msg)) {
+      return;
+    }
+    const mount = this.kvMount();
+    throw new BadGatewayException(
+      `Vault ${op} failed: no route for "${resolvedPath}". ` +
+        `Ensure KV secrets engine v2 is enabled at mount "${mount}" (e.g. \`vault secrets enable -path=${mount} kv-v2\`) ` +
+        `or set VAULT_KV_MOUNT to your mount name. For local dev run \`bash infra/vault/init.sh\`. ` +
+        `App logical path: ${logicalPath}. Vault: ${msg}`,
+    );
   }
 
   private async renewToken(roleId: string, secretId: string) {

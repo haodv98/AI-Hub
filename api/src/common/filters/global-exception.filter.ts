@@ -22,10 +22,19 @@ const HTTP_CODE_MAP: Record<number, ErrorCode> = {
   403: ErrorCode.FORBIDDEN,
   404: ErrorCode.NOT_FOUND,
   409: ErrorCode.CONFLICT,
+  413: ErrorCode.PAYLOAD_TOO_LARGE,
   422: ErrorCode.VALIDATION_ERROR,
   429: ErrorCode.RATE_LIMIT_EXCEEDED,
   500: ErrorCode.INTERNAL_ERROR,
 };
+
+function isPayloadTooLarge(exception: unknown): boolean {
+  if (!exception || typeof exception !== 'object') {
+    return false;
+  }
+  const e = exception as { type?: string; status?: number; statusCode?: number };
+  return e.type === 'entity.too.large' || e.status === 413 || e.statusCode === 413;
+}
 
 @Catch()
 export class GlobalExceptionFilter implements ExceptionFilter {
@@ -63,6 +72,10 @@ export class GlobalExceptionFilter implements ExceptionFilter {
         message = mapped.message;
       }
       this.logger.warn(`Prisma error ${exception.code}: ${exception.message}`);
+    } else if (isPayloadTooLarge(exception)) {
+      status = HttpStatus.PAYLOAD_TOO_LARGE;
+      code = ErrorCode.PAYLOAD_TOO_LARGE;
+      message = 'Request body exceeds configured size limit';
     } else if (exception instanceof Error) {
       this.logger.error(`Unhandled error: ${exception.message}`, exception.stack);
     }

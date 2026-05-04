@@ -36,11 +36,34 @@ export class TeamsService {
     private readonly keys: KeysService,
   ) {}
 
-  async findAll(): Promise<Team[]> {
-    return this.prisma.team.findMany({
-      orderBy: { name: 'asc' },
-      include: { _count: { select: { members: true } } },
-    });
+  async findAll(params: {
+    page?: number;
+    limit?: number;
+    search?: string;
+    sortBy?: string;
+    sortOrder?: 'asc' | 'desc';
+  } = {}): Promise<{ teams: Team[]; total: number }> {
+    const page  = params.page  ?? 1;
+    const limit = Math.min(params.limit ?? 20, 100);
+    const order = params.sortOrder ?? 'asc';
+    const validSort = ['name', 'createdAt', 'updatedAt'];
+    const sortBy = validSort.includes(params.sortBy ?? '') ? params.sortBy! : 'name';
+
+    const where = params.search
+      ? { name: { contains: params.search, mode: 'insensitive' as const } }
+      : undefined;
+
+    const [teams, total] = await Promise.all([
+      this.prisma.team.findMany({
+        where,
+        orderBy: { [sortBy]: order },
+        include: { _count: { select: { members: true } } },
+        skip: (page - 1) * limit,
+        take: limit,
+      }),
+      this.prisma.team.count({ where }),
+    ]);
+    return { teams, total };
   }
 
   async findById(id: string): Promise<Team> {
@@ -121,5 +144,44 @@ export class TeamsService {
     });
     this.audit.log({ actorId, action: 'MEMBER_TIER_CHANGE', targetType: 'TeamMember', targetId: membership.id, details: { teamId, userId, tier } });
     return membership;
+  }
+
+  // ── Policy attachment ──────────────────────────────────────────────────────
+
+  async getTeamPolicies(teamId: string) {
+    await this.findById(teamId); // 404 if not found
+    return this.prisma.policy.findMany({
+      where: { teamId },
+      orderBy: [{ priority: 'desc' }, { createdAt: 'desc' }],
+    });
+  }
+
+  async attachPolicy(teamId: string, policyId: string, actorId: string) {
+    await this.findById(teamId);
+    const policy = await this.prisma.policy.findUnique({ where: { id: policyId } });
+    if (!policy) throw new NotFoundException(`Policy ${policyId} not found`);
+
+    const updated = await this.prisma.policy.update({
+      where: { id: policyId },
+      data: { teamId },
+    });
+    this.audit.log({ actorId, action: 'POLICY_UPDATE', targetType: 'TEAM', targetId: teamId, details: { event: 'attach', policyId } });
+    return updated;
+  }
+
+  async detachPolicy(teamId: string, policyId: string, actorId: string) {
+    const policy = await this.prisma.policy.findFirst({ where: { id: policyId, teamId } });
+    if (!policy) throw new NotFoundException(`Policy ${policyId} is not attached to team ${teamId}`);
+
+    await this.prisma.policy.update({ where: { id: policyId }, data: { teamId: null } });
+    this.audit.log({ actorId, action: 'POLICY_UPDATE', targetType: 'TEAM', targetId: teamId, details: { event: 'detach', policyId } });
+  }
+
+  async getEffectivePolicy(teamId: string) {
+    await this.findById(teamId);
+    return this.prisma.policy.findFirst({
+      where: { teamId, isActive: true },
+      orderBy: { priority: 'desc' },
+    });
   }
 }

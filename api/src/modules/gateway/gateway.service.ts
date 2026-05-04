@@ -2,6 +2,7 @@ import {
   Injectable,
   Logger,
   ForbiddenException,
+  BadRequestException,
   HttpException,
   HttpStatus,
 } from '@nestjs/common';
@@ -23,6 +24,8 @@ export interface UserContext {
   apiKeyId: string;
   teamId: string | null;
   tier: string;
+  /** When set on the API key, gateway uses this LiteLLM model id instead of the client `model` field. */
+  defaultUpstreamModel?: string | null;
 }
 
 export interface GatewayResult {
@@ -30,17 +33,20 @@ export interface GatewayResult {
   headers: Record<string, string>;
 }
 
-type SupportedProvider = 'anthropic' | 'openai' | 'google';
+type SupportedProvider = 'anthropic' | 'openai' | 'google' | 'cursor' | 'other';
 
 interface ResolvedProviderKey {
   key: string;
   scope: 'PER_SEAT' | 'SHARED';
+  gatewayUrl?: string;
 }
 
 const PROVIDER_ENUM_MAP: Record<SupportedProvider, ProviderType> = {
   anthropic: ProviderType.ANTHROPIC,
   openai: ProviderType.OPENAI,
   google: ProviderType.GOOGLE,
+  cursor: ProviderType.CURSOR,
+  other: ProviderType.OTHER,
 };
 
 @Injectable()
@@ -61,7 +67,15 @@ export class GatewayService {
 
   async handleRequest(user: UserContext, body: Record<string, unknown>): Promise<GatewayResult> {
     const requestStart = Date.now();
-    const requestedModel = body.model as string;
+    const keyOverride =
+      typeof user.defaultUpstreamModel === 'string' && user.defaultUpstreamModel.trim().length > 0
+        ? user.defaultUpstreamModel.trim()
+        : null;
+    const clientModel = typeof body.model === 'string' ? body.model : '';
+    const requestedModel = keyOverride ?? clientModel;
+    if (!requestedModel) {
+      throw new BadRequestException('Missing model (set on API key or in request body)');
+    }
     const requestedProvider = this.getProvider(requestedModel);
 
     // ── Step 1: Auth validated by ApiKeyGuard ─────────────────────────────
@@ -187,6 +201,7 @@ export class GatewayService {
     if (model.includes('claude')) return 'anthropic';
     if (model.includes('gpt') || model.includes('o1') || model.includes('o3')) return 'openai';
     if (model.includes('gemini')) return 'google';
+    if (model.includes('cursor')) return 'cursor';
     return 'anthropic';
   }
 
@@ -203,10 +218,19 @@ export class GatewayService {
 
     if (perSeatRecord) {
       const key = await this.vault.readSecret(perSeatRecord.vaultPath, 'api_key');
-      return { key, scope: 'PER_SEAT' };
+      let gatewayUrl: string | undefined;
+      if (provider === 'other') {
+        gatewayUrl = await this.vault.readSecret(perSeatRecord.vaultPath, 'gateway_url').catch(() => undefined);
+      }
+      return { key, scope: 'PER_SEAT', gatewayUrl };
     }
 
-    const key = await this.vault.getProviderKey(provider);
+    // CURSOR and OTHER only support PER_SEAT — no shared fallback
+    if (provider === 'cursor' || provider === 'other') {
+      throw new ForbiddenException(`No PER_SEAT provider key configured for ${provider.toUpperCase()}. Ask an IT Admin to assign one.`);
+    }
+
+    const key = await this.vault.getProviderKey(provider as 'anthropic' | 'openai' | 'google');
     return { key, scope: 'SHARED' };
   }
 }

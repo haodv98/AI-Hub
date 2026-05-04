@@ -81,6 +81,15 @@ export class UsersController {
     return ApiResponse.ok(await this.users.assignPerSeatKey(id, dto, req.user.id));
   }
 
+  @Post(':id/provider-keys/test')
+  @Auth(UserRole.IT_ADMIN, UserRole.SUPER_ADMIN)
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Test connectivity for a provider key before assigning' })
+  @ApiParam({ name: 'id', type: String })
+  async testProviderKey(@Param('id') id: string, @Body() dto: AssignPerSeatKeyDto, @Request() req: any) {
+    return ApiResponse.ok(await this.users.testProviderKey(id, dto, req.user.id));
+  }
+
   @Post('provider-keys/import')
   @Auth(UserRole.IT_ADMIN, UserRole.SUPER_ADMIN)
   @HttpCode(HttpStatus.OK)

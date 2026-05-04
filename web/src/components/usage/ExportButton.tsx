@@ -1,7 +1,7 @@
 /* eslint-disable react/react-in-jsx-scope */
 import { useState } from 'react';
 import { Download } from 'lucide-react';
-import api from '@/lib/api';
+import api, { mapApiError } from '@/lib/api';
 
 interface ExportButtonProps {
   from: string;
@@ -32,8 +32,9 @@ export function ExportButton({ from, to }: ExportButtonProps) {
       a.click();
       a.remove();
       URL.revokeObjectURL(url);
-    } catch {
-      setError(`Failed to export ${format.toUpperCase()}.`);
+    } catch (err) {
+      const mapped = mapApiError(err, `Failed to export ${format.toUpperCase()}.`);
+      setError(mapped.message);
     } finally {
       setLoading(null);
     }

@@ -1,0 +1,57 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: aihub-api
+  namespace: aihub-staging
+  labels:
+    app.kubernetes.io/name: aihub-api
+    environment: staging
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: aihub-api
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: aihub-api
+    spec:
+      containers:
+        - name: api
+          image: aihub-api:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 3001
+          envFrom:
+            - configMapRef:
+                name: aihub-api-staging-env
+          env:
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: aihub-staging-core
+                  key: database_url
+            - name: REDIS_URL
+              valueFrom:
+                secretKeyRef:
+                  name: aihub-staging-core
+                  key: redis_url
+            - name: VAULT_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: aihub-staging-core
+                  key: vault_token
+                  optional: true
+          readinessProbe:
+            httpGet:
+              path: /api/health
+              port: http
+            initialDelaySeconds: 15
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /api/health
+              port: http
+            initialDelaySeconds: 30
+            periodSeconds: 20

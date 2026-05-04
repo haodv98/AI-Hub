@@ -7,6 +7,7 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { BudgetService } from '../budget/budget.service';
 import { AlertsService } from '../alerts/alerts.service';
 import {
+  ApiKeyUsageHistoryItem,
   DailySummaryRow,
   ModelUsageRow,
   OrgSummary,
@@ -645,6 +646,41 @@ export class UsageService implements OnApplicationShutdown {
     `;
   }
 
+  /** Per-key request history from `usage_events` (single entry point for this table). */
+  async getKeyUsageHistory(keyId: string, from: Date, to: Date): Promise<ApiKeyUsageHistoryItem[]> {
+    if (!(await this.canUseRawUsageEvents())) {
+      return [];
+    }
+    try {
+      const rows = await this.prisma.$queryRaw<
+        Array<{ created_at: Date; endpoint: string | null; status_code: number | null; total_tokens: bigint | null; model: string | null }>
+      >`
+        SELECT created_at, endpoint, status_code, total_tokens, model
+        FROM usage_events
+        WHERE api_key_id::text = ${keyId}
+          AND created_at BETWEEN ${from} AND ${to}
+        ORDER BY created_at DESC
+        LIMIT 100
+      `;
+      return rows.map((r) => ({
+        timestamp: r.created_at.toISOString(),
+        endpoint: r.endpoint ?? '/v1/chat/completions',
+        status: (r.status_code ?? 200) < 400 ? 'SUCCESS' : 'ERROR',
+        tokens: Number(r.total_tokens ?? 0),
+        model: r.model ?? 'unknown',
+      }));
+    } catch (err: unknown) {
+      if (this.isMissingUsageEventsRelationError(err)) {
+        this.usageEventsAvailability = false;
+        this.logger.warn(
+          'usage_events query failed for key usage history; returning empty list (check Timescale DDL).',
+        );
+        return [];
+      }
+      throw err;
+    }
+  }
+
   async getExportSummary(from: Date, to: Date): Promise<UsageExportSummary> {
     const useAggregates = await this.canUseAggregateViews();
     const useRawEvents = await this.canUseRawUsageEvents();
@@ -754,6 +790,13 @@ export class UsageService implements OnApplicationShutdown {
     budgetCapUsd: number,
   ): Promise<void> {
     await this.alerts.checkUserBudgetThresholds(userId, teamId, currentCostUsd, budgetCapUsd);
+  }
+
+  private isMissingUsageEventsRelationError(err: unknown): boolean {
+    const code = err && typeof err === 'object' && 'code' in err ? String((err as { code?: unknown }).code) : '';
+    if (code === '42P01') return true;
+    const msg = err instanceof Error ? err.message : String(err);
+    return /42P01|usage_events.*does not exist|relation "usage_events" does not exist/i.test(msg);
   }
 
   private async canUseAggregateViews(): Promise<boolean> {

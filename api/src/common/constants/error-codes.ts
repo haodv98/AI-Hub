@@ -11,6 +11,7 @@ export const ErrorCode = {
   CONFLICT:           'CONFLICT',
   RATE_LIMIT_EXCEEDED:'RATE_LIMIT_EXCEEDED',
   BUDGET_EXCEEDED:    'BUDGET_EXCEEDED',
+  PAYLOAD_TOO_LARGE:  'PAYLOAD_TOO_LARGE',
   INTERNAL_ERROR:     'INTERNAL_ERROR',
 } as const;
 
@@ -24,5 +25,6 @@ export const HTTP_STATUS_ERROR_CODE: Record<number, ErrorCode> = {
   409: ErrorCode.CONFLICT,
   422: ErrorCode.VALIDATION_ERROR,
   429: ErrorCode.RATE_LIMIT_EXCEEDED,
+  413: ErrorCode.PAYLOAD_TOO_LARGE,
   500: ErrorCode.INTERNAL_ERROR,
 };

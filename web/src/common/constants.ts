@@ -23,13 +23,16 @@ export const BREAKPOINTS = {
   '2xl': '1536px',
 };
 
+/** @deprecated Prefer POLICY_MODEL_IDS / POLICY_MODEL_IDS_FLAT from ./model-ids — values must match gateway/LiteLLM model ids. */
 export const ENGINES = [
-  'GPT-4o',
-  'GPT-4-Turbo',
-  'GPT-3.5-Turbo',
-  'Claude-3.5-Sonnet',
-  'Claude-3.5-Opus',
-  'Llama-3-70b',
-  'Llama-3-8b',
-  'o1-preview',
+  'gpt-4o',
+  'gpt-4o-mini',
+  'o4-mini',
+  'claude-sonnet-4-20250514',
+  'claude-3-5-sonnet-20241022',
+  'claude-3-5-haiku-20241022',
+  'claude-3-haiku-20240307',
+  'gemini-2.0-flash',
+  'gemini-2.5-flash-preview-05-20',
+  'gemini-2.5-pro-preview-05-06',
 ] as const;

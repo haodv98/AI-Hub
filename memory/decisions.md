@@ -234,6 +234,20 @@ Gateway resolution order khi forward request:
 
 ---
 
+### [2026-05-04] Raw SQL on `usage_events` — bắt buộc probe DDL trước khi query
+
+**Context:** Bảng/hypertable `usage_events` không nằm trong Prisma schema (ADR-0003); môi trường dev hoặc DB chưa migrate Timescale sẽ không có relation. Mỗi lần thêm endpoint mới (ví dụ `GET /keys/:id/usage`) dễ copy `$queryRaw` trực tiếp → lỗi lặp `42P01 relation "usage_events" does not exist`.
+
+**Decision:**
+1. **Không** gọi `$queryRaw`/`$executeRaw` vào `usage_events` mà chưa kiểm tra tồn tại bảng.
+2. Trước khi đọc: dùng `SELECT to_regclass('usage_events')` (cache boolean per service instance) giống pattern trong `UsageService` và `ReportsService`.
+3. Nếu bảng không tồn tại: trả **dữ liệu rỗng** (hoặc nhánh fallback đã có sẵn trong `UsageService`), log `warn` một lần rõ ràng — không throw 500 cho UI admin.
+4. Vòng ngoài `try/catch`: nếu vẫn gặp `42P01` (race / partial migrate), coi như unavailable, set cache `false`, trả rỗng.
+
+**Consequences:** Code mới đụng usage time-series phải copy pattern này hoặc gọi lại service đã có guard (ưu tiên mở rộng `UsageService` thay vì SQL rải rác). FE có thể thấy list rỗng thay vì crash — đúng khi chưa có hypertable. **`KeysService.getKeyUsageHistory` đã delegate sang `UsageService.getKeyUsageHistory`** — mọi đọc `usage_events` theo key nằm trong `UsageModule`.
+
+---
+
 ## Resolved Decisions Summary
 
 | ID | Decision | Resolution | ADR |

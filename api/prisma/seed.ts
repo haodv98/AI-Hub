@@ -106,10 +106,10 @@ async function main() {
   // ── Policies ─────────────────────────────────────────────────────────────
   log('policies', 'upserting...');
   await prisma.policy.upsert({
-    where: { id: 'org-default-policy-id' },
+    where: { id: '00000000-0000-0000-0000-000000000001' },
     update: {},
     create: {
-      id: 'org-default-policy-id',
+      id: '00000000-0000-0000-0000-000000000001',
       name: 'Org Default',
       description: 'Default policy for all users',
       teamId: null,
@@ -124,10 +124,10 @@ async function main() {
     },
   });
   await prisma.policy.upsert({
-    where: { id: 'backend-team-policy-id' },
+    where: { id: '00000000-0000-0000-0000-000000000002' },
     update: {},
     create: {
-      id: 'backend-team-policy-id',
+      id: '00000000-0000-0000-0000-000000000002',
       name: 'Backend Team Policy',
       description: 'Enhanced policy for Backend team',
       teamId: teamBackend.id,

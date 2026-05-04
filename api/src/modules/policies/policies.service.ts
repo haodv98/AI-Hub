@@ -62,15 +62,39 @@ export class PoliciesService {
     }
   }
 
-  async findAll(filters?: { teamId?: string; userId?: string; isActive?: boolean }): Promise<Policy[]> {
-    return this.prisma.policy.findMany({
-      where: {
-        ...(filters?.teamId !== undefined ? { teamId: filters.teamId } : {}),
-        ...(filters?.userId !== undefined ? { userId: filters.userId } : {}),
-        ...(filters?.isActive !== undefined ? { isActive: filters.isActive } : {}),
-      },
-      orderBy: [{ priority: 'desc' }, { createdAt: 'desc' }],
-    });
+  async findAll(filters?: {
+    teamId?: string;
+    userId?: string;
+    isActive?: boolean;
+    search?: string;
+    page?: number;
+    limit?: number;
+    sortBy?: string;
+    sortOrder?: 'asc' | 'desc';
+  }): Promise<{ policies: Policy[]; total: number }> {
+    const page  = filters?.page  ?? 1;
+    const limit = Math.min(filters?.limit ?? 20, 100);
+    const order = filters?.sortOrder ?? 'desc';
+    const validSort = ['priority', 'name', 'createdAt', 'updatedAt'];
+    const sortBy = validSort.includes(filters?.sortBy ?? '') ? filters!.sortBy! : 'priority';
+
+    const where = {
+      ...(filters?.teamId   !== undefined ? { teamId: filters.teamId }     : {}),
+      ...(filters?.userId   !== undefined ? { userId: filters.userId }     : {}),
+      ...(filters?.isActive !== undefined ? { isActive: filters.isActive } : {}),
+      ...(filters?.search   ? { name: { contains: filters.search, mode: 'insensitive' as const } } : {}),
+    };
+
+    const [policies, total] = await Promise.all([
+      this.prisma.policy.findMany({
+        where,
+        orderBy: [{ [sortBy]: order }, { createdAt: 'desc' }],
+        skip: (page - 1) * limit,
+        take: limit,
+      }),
+      this.prisma.policy.count({ where }),
+    ]);
+    return { policies, total };
   }
 
   async findById(id: string): Promise<Policy> {

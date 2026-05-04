@@ -18,6 +18,7 @@ import { ReportsModule } from './modules/reports/reports.module';
 import { HrModule } from './modules/integrations/hr/hr.module';
 import { HealthController } from './health.controller';
 import { MetricsModule } from './modules/metrics/metrics.module';
+import { SystemConfigModule } from './modules/system-config/system-config.module';
 
 @Module({
   controllers: [HealthController],
@@ -62,6 +63,7 @@ import { MetricsModule } from './modules/metrics/metrics.module';
     GatewayModule,
     ReportsModule,
     HrModule,
+    SystemConfigModule,
   ],
 })
 export class AppModule {}

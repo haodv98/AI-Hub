@@ -92,6 +92,15 @@ vault kv put secret/aihub/providers/google api_key="AIzaSy..."
 - Verify Keycloak realm `aihub` is imported (check Admin Console)
 - Check redirect URI matches your frontend URL
 
+**Claude Code with a Google (Gemini) per-seat key:** Claude Code always sends Anthropic-style `model` (e.g. `claude-*`). Assign the user a **PER_SEAT** Google key, then on **Keys** set **Gateway model override** to a real LiteLLM id (e.g. `gemini-2.0-flash`). Policy **allowed engines** must include that exact string, or be empty (allow all). There is no standard id `gemini-3-flash`; use the model name your LiteLLM build supports.
+
+**Claude Code / Anthropic CLI → APISix returns 401 (`OIDC introspection failed: invalid token`):**
+- Internal keys are **not** Keycloak JWTs. Re-apply gateway routes so `/api/v1/messages` and `/api/v1/chat/completions` bypass OIDC: `bash infra/keycloak/init.sh` (with `KEYCLOAK_CLIENT_SECRET` if needed).
+- Either base URL works after that:
+  - `export ANTHROPIC_BASE_URL="http://localhost:9080/api"` (SDK calls `/api/v1/messages`)
+  - `export ANTHROPIC_BASE_URL="http://localhost:9080"` (SDK calls `/v1/messages`; APISix rewrites to Nest)
+- Use the **internal** key as `ANTHROPIC_API_KEY` (`Bearer` or `x-api-key`). Nest still validates the key.
+
 **Vault AppRole auth fails:**
 - Re-run `bash infra/vault/init.sh` to regenerate AppRole credentials
 - Update `.env` with new VAULT_ROLE_ID and VAULT_SECRET_ID from `.env.vault`

@@ -29,7 +29,7 @@ import {
 import { SegmentedFilterButton } from '@/components/atoms/SegmentedFilterButton';
 import { ExportButton } from '@/components/usage/ExportButton';
 import { UsageHeatmap } from '@/components/usage/UsageHeatmap';
-import { ErrorPanel } from '@/components/ui/RequestState';
+import { EmptyState, ErrorPanel } from '@/components/ui/RequestState';
 import { useAuth } from '@/contexts/AuthContext';
 import { canUseCapability } from '@/lib/capabilities';
 import { presetToDateRange } from '@/lib/date-range';
@@ -75,8 +75,16 @@ export default function Usage() {
 
   const { data, isLoading, isError, refetch } = useQuery<OrgSummary>({
     queryKey: ['usage', 'summary', dateRange.from, dateRange.to],
-    queryFn: () => getEnvelope('/usage/summary', { from: dateRange.from, to: dateRange.to }),
+    queryFn: () => getEnvelope<OrgSummary>('/usage/summary', { from: dateRange.from, to: dateRange.to }),
   });
+
+  const noUsageInRange =
+    !isLoading &&
+    !isError &&
+    data &&
+    (data.totalRequests ?? 0) === 0 &&
+    (data.byDay?.length ?? 0) === 0 &&
+    (data.byTeam?.length ?? 0) === 0;
 
   const dailySpend = (data?.byDay ?? []).map((row) => ({
     date: row.date.slice(5),
@@ -129,7 +137,11 @@ export default function Usage() {
       </div>
 
       {isError && (
-        <ErrorPanel message="Failed to load usage data." onRetry={() => void refetch()} />
+        <ErrorPanel message="Failed to load usage summary (envelope or 403)." onRetry={() => void refetch()} />
+      )}
+
+      {noUsageInRange && (
+        <EmptyState message="No usage recorded for this date range. KPIs and charts reflect zeros until data exists for the selected window." />
       )}
 
       <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
@@ -257,6 +269,16 @@ export default function Usage() {
             </tr>
           </thead>
           <tbody className="divide-y divide-white/5">
+            {!isLoading &&
+              !isError &&
+              !noUsageInRange &&
+              (data?.topUsers ?? []).length === 0 && (
+                <tr>
+                  <td colSpan={6} className="px-8 py-8">
+                    <EmptyState message="No ranked operators for this range (or insufficient aggregate data)." />
+                  </td>
+                </tr>
+              )}
             {(data?.topUsers ?? []).map((user) => (
               <tr key={user.userId} className="group hover:bg-white/5 transition-all">
                 <td className="px-8 py-8">

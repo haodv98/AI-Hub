@@ -46,16 +46,20 @@ export default function AuditLogs() {
   const [searchTerm, setSearchTerm] = useState('');
   const [typeFilter, setTypeFilter] = useState<'ALL' | AuditTargetType>('ALL');
   const [page, setPage] = useState(1);
+  const [fromDate, setFromDate] = useState('');
+  const [toDate, setToDate] = useState('');
   const limit = 20;
 
   const { data, isLoading, isError, refetch } = useQuery({
-    queryKey: ['audit-logs', searchTerm, typeFilter, page, limit],
+    queryKey: ['audit-logs', searchTerm, typeFilter, page, limit, fromDate, toDate],
     queryFn: async () => {
       const result = await getPaginatedEnvelope<AuditLogItem[]>('/audit-logs', {
         page,
         limit,
         ...(searchTerm.trim() ? { q: searchTerm.trim() } : {}),
         ...(typeFilter !== 'ALL' ? { targetType: typeFilter } : {}),
+        ...(fromDate.trim() ? { from: fromDate.trim() } : {}),
+        ...(toDate.trim() ? { to: toDate.trim() } : {}),
       });
       return result;
     },
@@ -94,8 +98,54 @@ export default function AuditLogs() {
       </div>
 
       {isError && (
-        <ErrorPanel message="Failed to load audit logs from API." onRetry={() => void refetch()} />
+        <ErrorPanel message="Failed to load audit logs (check envelope or query params)." onRetry={() => void refetch()} />
       )}
+
+      <div className="glass-panel rounded-xl p-4 grid grid-cols-1 md:grid-cols-12 gap-4 items-end">
+        <div className="md:col-span-4 space-y-1">
+          <label htmlFor="audit-from" className="text-[9px] font-black uppercase tracking-[0.2em] text-on-surface-variant opacity-60 ml-1">
+            From (ISO date)
+          </label>
+          <input
+            id="audit-from"
+            type="date"
+            className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-2 text-xs font-bold uppercase tracking-widest"
+            value={fromDate}
+            onChange={(e) => {
+              setFromDate(e.target.value);
+              setPage(1);
+            }}
+          />
+        </div>
+        <div className="md:col-span-4 space-y-1">
+          <label htmlFor="audit-to" className="text-[9px] font-black uppercase tracking-[0.2em] text-on-surface-variant opacity-60 ml-1">
+            To (ISO date)
+          </label>
+          <input
+            id="audit-to"
+            type="date"
+            className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-2 text-xs font-bold uppercase tracking-widest"
+            value={toDate}
+            onChange={(e) => {
+              setToDate(e.target.value);
+              setPage(1);
+            }}
+          />
+        </div>
+        <div className="md:col-span-4 flex gap-2">
+          <button
+            type="button"
+            onClick={() => {
+              setFromDate('');
+              setToDate('');
+              setPage(1);
+            }}
+            className="flex-1 py-2 px-3 text-[10px] font-black uppercase tracking-widest rounded-xl border border-white/10 text-on-surface-variant hover:border-primary/40 hover:text-primary transition-all"
+          >
+            Clear date range
+          </button>
+        </div>
+      </div>
 
       <div className="grid grid-cols-1 md:grid-cols-12 gap-4">
         <div className="md:col-span-8 glass-panel p-4 rounded-xl flex items-center gap-3">

@@ -1,6 +1,8 @@
 import {
+  BadRequestException,
   Controller,
   Post,
+  Patch,
   Get,
   Param,
   Query,
@@ -25,6 +27,10 @@ interface AuthenticatedRequest {
 
 interface ClaimKeyDto {
   token: string;
+}
+
+interface UpdateKeyGatewayModelDto {
+  defaultUpstreamModel: string | null;
 }
 
 @ApiTags('keys')
@@ -69,10 +75,32 @@ export class KeysController {
           email: k.user?.email ?? 'unknown@aihub.internal',
         },
         providerRouting: k.providerRouting,
+        defaultUpstreamModel: k.defaultUpstreamModel ?? null,
       })),
       total,
       pagination.page,
       pagination.limit,
+    );
+  }
+
+  @Patch(':id/gateway-model')
+  @Auth(UserRole.IT_ADMIN, UserRole.SUPER_ADMIN)
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary:
+      'Set LiteLLM model id for this API key (overrides client `model` on gateway). Use for Claude Code + Gemini: clients send claude-*; set e.g. gemini-2.0-flash.',
+  })
+  @ApiParam({ name: 'id', type: String })
+  async updateGatewayModel(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() body: UpdateKeyGatewayModelDto,
+    @Request() req: AuthenticatedRequest,
+  ) {
+    if (!Object.prototype.hasOwnProperty.call(body, 'defaultUpstreamModel')) {
+      throw new BadRequestException('Body must include defaultUpstreamModel (string or null to clear)');
+    }
+    return ApiResponse.ok(
+      await this.keys.updateGatewayDefaultModel(id, req.user.id, body.defaultUpstreamModel),
     );
   }
 
@@ -124,5 +152,25 @@ export class KeysController {
   @ApiOperation({ summary: 'Claim onboarding key once using secure token' })
   async claimKey(@Body() body: ClaimKeyDto, @Request() req: AuthenticatedRequest) {
     return ApiResponse.ok(await this.keys.claimOnboardingKey(req.user.id, body.token));
+  }
+
+  @Get(':id/usage')
+  @Auth(UserRole.IT_ADMIN, UserRole.SUPER_ADMIN)
+  @ApiOperation({ summary: 'Get usage history for an API key' })
+  @ApiParam({ name: 'id', type: String })
+  @ApiQuery({ name: 'from', required: true, type: String, description: 'ISO date' })
+  @ApiQuery({ name: 'to', required: true, type: String, description: 'ISO date' })
+  async getKeyUsage(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Query('from') fromRaw: string,
+    @Query('to') toRaw: string,
+  ) {
+    if (!fromRaw) throw new BadRequestException('Missing required query param: from');
+    if (!toRaw)   throw new BadRequestException('Missing required query param: to');
+    const from = new Date(fromRaw);
+    const to   = new Date(toRaw);
+    if (isNaN(from.getTime())) throw new BadRequestException('Invalid date for from');
+    if (isNaN(to.getTime()))   throw new BadRequestException('Invalid date for to');
+    return ApiResponse.ok(await this.keys.getKeyUsageHistory(id, from, to));
   }
 }

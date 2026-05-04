@@ -53,7 +53,14 @@ api.interceptors.request.use(async (config) => {
 api.interceptors.response.use(
   (res) => res,
   (err) => {
-    if (err.response?.status === 401) keycloak.login();
+    // Do not call keycloak.login() on every 401 — that causes redirect loops when the API
+    // rejects a valid-looking session (e.g. user not provisioned → 403 after backend fix).
+    // Prefer silent refresh; only send user to Keycloak when refresh actually fails.
+    if (err.response?.status === 401) {
+      void keycloak.updateToken(-1).catch(() => {
+        keycloak.login();
+      });
+    }
     return Promise.reject(err);
   },
 );
@@ -123,14 +130,31 @@ export async function putEnvelope<T, P = unknown>(path: string, payload?: P): Pr
   return unwrapEnvelope(response.data, 'Failed to update data').data;
 }
 
+export async function patchEnvelope<T, P = unknown>(path: string, payload?: P): Promise<T> {
+  let response;
+  try {
+    response = await api.patch<ApiEnvelope<T>>(path, payload);
+  } catch (error) {
+    throw mapApiError(error, 'Failed to update data');
+  }
+  return unwrapEnvelope(response.data, 'Failed to update data').data;
+}
+
 export async function deleteEnvelope<T>(path: string): Promise<T> {
   let response;
   try {
-    response = await api.delete<ApiEnvelope<T>>(path);
+    response = await api.delete(path);
   } catch (error) {
     throw mapApiError(error, 'Failed to delete data');
   }
-  return unwrapEnvelope(response.data, 'Failed to delete data').data;
+  if (response.status === 204) {
+    return undefined as T;
+  }
+  const payload = response.data as ApiEnvelope<T> | null | undefined;
+  if (payload == null) {
+    return undefined as T;
+  }
+  return unwrapEnvelope(payload, 'Failed to delete data').data;
 }
 
 export default api;

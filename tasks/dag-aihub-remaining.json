@@ -1,0 +1,83 @@
+{
+  "title": "AI Hub — chỉ việc chưa [ ] (subset; dùng dag-aihub-full.json cho graph đầy đủ + Phase 4 + meta)",
+  "tasks": [
+    {
+      "id": "t-380-k8s-manifests",
+      "depends_on": [],
+      "complexity": "HIGH",
+      "subtask_prompt": "TASK-380 phase3-rollout.md: Kubernetes manifests on-prem production (infra/). Không hardcode secrets."
+    },
+    {
+      "id": "t-381-compose-staging",
+      "depends_on": [],
+      "complexity": "MED",
+      "subtask_prompt": "TASK-381: Docker Compose staging profile + .env.staging.example."
+    },
+    {
+      "id": "t-382-cicd",
+      "depends_on": ["t-380-k8s-manifests", "t-381-compose-staging"],
+      "complexity": "MED",
+      "subtask_prompt": "TASK-382: CI/CD staging+prod sau 380+381 (GitHub Actions, gate migrate)."
+    },
+    {
+      "id": "t-fe-members",
+      "depends_on": [],
+      "complexity": "MED",
+      "subtask_prompt": "Phase3 matrix: Members page — endpoint thật, bỏ placeholder."
+    },
+    {
+      "id": "t-fe-teamdetail",
+      "depends_on": [],
+      "complexity": "MED",
+      "subtask_prompt": "TeamDetail: mutations thật + invalidation nhất quán."
+    },
+    {
+      "id": "t-fe-memberdetail",
+      "depends_on": [],
+      "complexity": "MED",
+      "subtask_prompt": "MemberDetail: actions unsupported → explicit state."
+    },
+    {
+      "id": "t-fe-shared-envelope",
+      "depends_on": [],
+      "complexity": "MED",
+      "subtask_prompt": "AuditLogs/Usage/Reports: envelope + retry/error/empty."
+    },
+    {
+      "id": "t-docs-matrix",
+      "depends_on": [],
+      "complexity": "LOW",
+      "subtask_prompt": "docs/integration/phase3-web-backend-matrix.md đồng bộ code."
+    },
+    {
+      "id": "t-x01-test-infra",
+      "depends_on": [],
+      "complexity": "MED",
+      "subtask_prompt": "TASK-X01: test infra + test DB (api)."
+    },
+    {
+      "id": "t-p2-policy-tests",
+      "depends_on": [],
+      "complexity": "MED",
+      "subtask_prompt": "Phase2: policy cascade tests ≥15, coverage ≥80%."
+    },
+    {
+      "id": "t-p2-gateway-verify",
+      "depends_on": [],
+      "complexity": "HIGH",
+      "subtask_prompt": "Phase2: gateway model/budget/fallback verify or fix."
+    },
+    {
+      "id": "t-x02-e2e-gateway",
+      "depends_on": ["t-x01-test-infra"],
+      "complexity": "HIGH",
+      "subtask_prompt": "TASK-X02: gateway E2E tests."
+    },
+    {
+      "id": "t-x03-playwright",
+      "depends_on": ["t-x01-test-infra"],
+      "complexity": "MED",
+      "subtask_prompt": "TASK-X03: Playwright admin smoke."
+    }
+  ]
+}

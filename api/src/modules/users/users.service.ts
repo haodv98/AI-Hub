@@ -1,10 +1,11 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
 import { KeysService } from '../keys/keys.service';
+import { ProviderTestService, TestConnectionResult } from './provider-test.service';
 import { User, UserStatus, UserRole, ProviderType, TeamMemberTier } from '@prisma/client';
-import { IsEmail, IsEnum, IsNotEmpty, IsOptional, IsString } from 'class-validator';
+import { IsEmail, IsEnum, IsNotEmpty, IsOptional, IsString, IsUrl, ValidateIf } from 'class-validator';
 import { VaultService } from '../../vault/vault.service';
 import { EmailService } from '../integrations/email/email.service';
 
@@ -39,6 +40,13 @@ export class AssignPerSeatKeyDto {
   @IsString()
   @IsNotEmpty()
   apiKey: string;
+
+  @ApiPropertyOptional({ description: 'Required when provider is OTHER', example: 'https://api.your-gateway.com' })
+  @IsOptional()
+  @ValidateIf((o: AssignPerSeatKeyDto) => o.provider === ProviderType.OTHER)
+  @IsNotEmpty({ message: 'gatewayUrl is required when provider is OTHER' })
+  @IsUrl({ require_tld: false, protocols: ['http', 'https'] })
+  gatewayUrl?: string;
 }
 
 export interface BulkImportPerSeatResult {
@@ -81,12 +89,15 @@ function parseCsvLine(line: string): string[] {
 
 @Injectable()
 export class UsersService {
+  private readonly logger = new Logger(UsersService.name);
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly audit: AuditService,
     private readonly keys: KeysService,
     private readonly vault: VaultService,
     private readonly email: EmailService,
+    private readonly providerTest: ProviderTestService,
   ) {}
 
   async findAll(opts: {
@@ -108,7 +119,15 @@ export class UsersService {
         skip: (opts.page - 1) * opts.limit,
         take: opts.limit,
         orderBy: { createdAt: 'desc' },
-        include: { teamMembers: { include: { team: true } } },
+        include: {
+          teamMembers: { include: { team: true } },
+          apiKeys: {
+            where: { status: { in: ['ACTIVE', 'ROTATING'] } },
+            select: { lastUsedAt: true },
+            orderBy: { lastUsedAt: 'desc' },
+            take: 1,
+          },
+        },
       }),
       this.prisma.user.count({ where }),
     ]);
@@ -202,12 +221,18 @@ export class UsersService {
     }
 
     try {
-      await this.vault.writeSecret(vaultPath, { api_key: dto.apiKey });
+      const secretPayload: Record<string, string> = { api_key: dto.apiKey };
+      if (dto.gatewayUrl) secretPayload.gateway_url = dto.gatewayUrl;
+      await this.vault.writeSecret(vaultPath, secretPayload);
     } catch (err) {
-      await this.prisma.providerKey.update({
-        where: { id: providerKeyId },
-        data: { isActive: false },
-      });
+      try {
+        await this.prisma.providerKey.update({
+          where: { id: providerKeyId },
+          data: { isActive: false },
+        });
+      } catch (rollbackErr: unknown) {
+        this.logger.error(`Vault write failed AND rollback failed for providerKey ${providerKeyId}`, rollbackErr);
+      }
       throw err;
     }
 
@@ -454,5 +479,27 @@ export class UsersService {
       errors: deliveryErrors,
       deliveryQueued,
     };
+  }
+
+  async testProviderKey(
+    userId: string,
+    dto: AssignPerSeatKeyDto,
+    actorId: string,
+  ): Promise<TestConnectionResult> {
+    await this.findById(userId); // Guard: ensures user exists before calling external APIs
+    const result = await this.providerTest.testConnection(dto.provider, dto.apiKey, dto.gatewayUrl);
+    this.audit.log({
+      actorId,
+      action: 'USER_UPDATE',
+      targetType: 'ProviderKey',
+      targetId: userId,
+      details: {
+        operation: 'test_connection',
+        provider: dto.provider,
+        success: result.success,
+        latencyMs: result.latencyMs,
+      },
+    });
+    return result;
   }
 }
