@@ -1,0 +1,50 @@
+{
+  "request": {
+    "input": {
+      "model": "gemini-1.5-pro",
+      "messages": [
+        { "role": "system", "content": "Be concise." },
+        { "role": "user", "content": "What is 2+2?" },
+        { "role": "assistant", "content": "4." },
+        { "role": "user", "content": "Why?" }
+      ],
+      "max_tokens": 256,
+      "temperature": 0.3
+    },
+    "expected": {
+      "systemInstruction": { "parts": [{ "text": "Be concise." }] },
+      "contents": [
+        { "role": "user", "parts": [{ "text": "What is 2+2?" }] },
+        { "role": "model", "parts": [{ "text": "4." }] },
+        { "role": "user", "parts": [{ "text": "Why?" }] }
+      ],
+      "generationConfig": { "maxOutputTokens": 256, "temperature": 0.3 }
+    }
+  },
+  "request_no_system": {
+    "input": {
+      "messages": [{ "role": "user", "content": "Hello" }]
+    },
+    "expected": {
+      "contents": [{ "role": "user", "parts": [{ "text": "Hello" }] }]
+    }
+  },
+  "response": {
+    "input": {
+      "candidates": [{
+        "content": { "parts": [{ "text": "Because arithmetic." }] },
+        "finishReason": "STOP"
+      }],
+      "usageMetadata": { "promptTokenCount": 20, "candidatesTokenCount": 5 }
+    },
+    "expected": {
+      "object": "chat.completion",
+      "choices": [{
+        "index": 0,
+        "message": { "role": "assistant", "content": "Because arithmetic." },
+        "finish_reason": "stop"
+      }],
+      "usage": { "prompt_tokens": 20, "completion_tokens": 5, "total_tokens": 25 }
+    }
+  }
+}

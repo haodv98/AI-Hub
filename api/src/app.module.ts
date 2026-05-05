@@ -14,6 +14,7 @@ import { PoliciesModule } from './modules/policies/policies.module';
 import { AlertsModule } from './modules/alerts/alerts.module';
 import { UsageModule } from './modules/usage/usage.module';
 import { GatewayModule } from './modules/gateway/gateway.module';
+import { ProviderAdapterModule } from './modules/provider-adapter/provider-adapter.module';
 import { ReportsModule } from './modules/reports/reports.module';
 import { HrModule } from './modules/integrations/hr/hr.module';
 import { HealthController } from './health.controller';
@@ -61,6 +62,7 @@ import { SystemConfigModule } from './modules/system-config/system-config.module
     UsageModule,
     MetricsModule,
     GatewayModule,
+    ProviderAdapterModule,
     ReportsModule,
     HrModule,
     SystemConfigModule,

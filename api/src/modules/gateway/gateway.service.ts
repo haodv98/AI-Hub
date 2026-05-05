@@ -17,6 +17,7 @@ import { PricingService } from '../budget/pricing.service';
 import { PoliciesService } from '../policies/policies.service';
 import { UsageService } from '../usage/usage.service';
 import { MetricsService } from '../metrics/metrics.service';
+import { ModelRouterService } from '../model-router/model-router.service';
 
 export interface UserContext {
   id: string;
@@ -63,6 +64,7 @@ export class GatewayService {
     private readonly policies: PoliciesService,
     private readonly usage: UsageService,
     private readonly metrics: MetricsService,
+    private readonly modelRouter: ModelRouterService,
   ) {}
 
   async handleRequest(user: UserContext, body: Record<string, unknown>): Promise<GatewayResult> {
@@ -115,8 +117,31 @@ export class GatewayService {
       );
     }
 
-    const actualModel = budgetResult.fallbackModel || requestedModel;
+    let actualModel = budgetResult.fallbackModel || requestedModel;
     const isFallback = !!budgetResult.fallbackModel;
+
+    // ── Step 5b: Provider Adapter routing (feature flag) ─────────────────
+    const adapterEnabled = this.config.get<string>('PROVIDER_ADAPTER_ENABLED', 'false') === 'true';
+    if (adapterEnabled) {
+      try {
+        const resolved = await this.modelRouter.resolveAlias(actualModel, {
+          apiKeyId: user.apiKeyId,
+          teamId: user.teamId ?? undefined,
+          userId: user.id,
+        });
+        if (resolved.comboName) {
+          // TODO Sprint 3: ComboService will handle this
+          this.logger.debug(`[ProviderAdapter] COMBO route: ${resolved.comboName} — falling through to LiteLLM`);
+        } else {
+          actualModel = resolved.providerModel;
+          // TODO Sprint 2: ProviderAdapterService.forward(resolved.providerModel, body, ...)
+          this.logger.debug(`[ProviderAdapter] Resolved: ${requestedModel} → ${actualModel}`);
+        }
+      } catch (err: unknown) {
+        this.logger.warn(`[ProviderAdapter] resolveAlias failed, falling back to LiteLLM: ${(err as Error).message}`);
+      }
+    }
+
     const provider = this.getProvider(actualModel);
 
     // ── Step 6: Resolve provider key — per-seat or shared ────────────────

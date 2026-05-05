@@ -1,0 +1,31 @@
+{
+  "request": {
+    "input": {
+      "systemInstruction": { "parts": [{ "text": "You are helpful." }] },
+      "contents": [
+        { "role": "user", "parts": [{ "text": "Hello" }] },
+        { "role": "model", "parts": [{ "text": "Hi!" }] },
+        { "role": "user", "parts": [{ "text": "Bye" }] }
+      ],
+      "generationConfig": { "maxOutputTokens": 100, "temperature": 0.5 }
+    },
+    "expected": {
+      "messages": [
+        { "role": "system", "content": "You are helpful." },
+        { "role": "user", "content": "Hello" },
+        { "role": "assistant", "content": "Hi!" },
+        { "role": "user", "content": "Bye" }
+      ],
+      "max_tokens": 100,
+      "temperature": 0.5
+    }
+  },
+  "request_no_system": {
+    "input": {
+      "contents": [{ "role": "user", "parts": [{ "text": "Ping" }] }]
+    },
+    "expected": {
+      "messages": [{ "role": "user", "content": "Ping" }]
+    }
+  }
+}

@@ -1,0 +1,59 @@
+{
+  "request": {
+    "input": {
+      "model": "claude-3-opus-20240229",
+      "system": "You are helpful.",
+      "messages": [
+        { "role": "user", "content": "Hello" }
+      ],
+      "max_tokens": 512,
+      "temperature": 0.5,
+      "stream": true
+    },
+    "expected": {
+      "model": "claude-3-opus-20240229",
+      "messages": [
+        { "role": "system", "content": "You are helpful." },
+        { "role": "user", "content": "Hello" }
+      ],
+      "max_tokens": 512,
+      "temperature": 0.5,
+      "stream": true
+    }
+  },
+  "request_content_array": {
+    "input": {
+      "model": "claude-3-haiku-20240307",
+      "messages": [
+        { "role": "user", "content": [{ "type": "text", "text": "Explain AI." }] }
+      ],
+      "max_tokens": 256
+    },
+    "expected": {
+      "model": "claude-3-haiku-20240307",
+      "messages": [
+        { "role": "user", "content": "Explain AI." }
+      ],
+      "max_tokens": 256
+    }
+  },
+  "response": {
+    "input": {
+      "id": "chatcmpl-abc123",
+      "model": "claude-3-opus-20240229",
+      "choices": [{
+        "index": 0,
+        "message": { "role": "assistant", "content": "Hi there!" },
+        "finish_reason": "stop"
+      }],
+      "usage": { "prompt_tokens": 10, "completion_tokens": 3 }
+    },
+    "expected": {
+      "id": "chatcmpl-abc123",
+      "model": "claude-3-opus-20240229",
+      "content": [{ "type": "text", "text": "Hi there!" }],
+      "stop_reason": "stop",
+      "usage": { "input_tokens": 10, "output_tokens": 3 }
+    }
+  }
+}

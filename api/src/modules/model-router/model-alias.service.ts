@@ -1,8 +1,8 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
+import { RedisService } from '../../redis/redis.service';
 import { ResolveContext, ResolveResult } from './model-router.types';
 
-// TODO: install minimatch@9 when implementing TASK-403
 function globMatch(str: string, pattern: string): boolean {
   const regex = new RegExp('^' + pattern.replace(/\*/g, '.*').replace(/\?/g, '.') + '$');
   return regex.test(str);
@@ -10,9 +10,22 @@ function globMatch(str: string, pattern: string): boolean {
 
 const CACHE_TTL_SECONDS = 300;
 
+type AliasRow = {
+  id: string;
+  fromPattern: string;
+  toProviderModel: string;
+  scope: string;
+  scopeId: string | null;
+  priority: number;
+  createdAt: Date;
+};
+
 @Injectable()
 export class ModelAliasService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly redis: RedisService,
+  ) {}
 
   async resolveAlias(model: string, ctx: ResolveContext): Promise<ResolveResult> {
     const levels = [
@@ -24,17 +37,9 @@ export class ModelAliasService {
     for (const level of levels) {
       if (!level.scopeId && level.scope !== 'ORG') continue;
 
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const aliases = await (this.prisma as any).modelAlias.findMany({
-        where: {
-          scope: level.scope,
-          scopeId: level.scopeId,
-          isActive: true,
-        },
-        orderBy: [{ priority: 'desc' }, { createdAt: 'desc' }],
-      });
-
+      const aliases = await this.getAliases(level.scope, level.scopeId);
       const match = this.findMatch(aliases, model);
+
       if (match) {
         const isCombo = match.toProviderModel.startsWith('COMBO:');
         return {
@@ -51,7 +56,6 @@ export class ModelAliasService {
       }
     }
 
-    // Passthrough: input must already be in "provider/model" format
     if (model.includes('/')) {
       return { providerModel: model, isPassthrough: true };
     }
@@ -62,20 +66,29 @@ export class ModelAliasService {
   }
 
   async invalidateCache(scope: string, scopeId: string | null): Promise<void> {
-    // Redis cache invalidation — inject RedisService when available
-    // Key pattern: aliases:<scope>:<scopeId>:*
-    // Placeholder for Sprint 1 TASK-403
+    await this.redis.del(`aliases:${scope}:${scopeId ?? 'null'}`);
   }
 
-  private findMatch(
-    aliases: { id: string; fromPattern: string; toProviderModel: string; scope: string; priority: number }[],
-    model: string,
-  ) {
-    // Exact match first
+  private async getAliases(scope: string, scopeId: string | null): Promise<AliasRow[]> {
+    const cacheKey = `aliases:${scope}:${scopeId ?? 'null'}`;
+    const cached = await this.redis.get(cacheKey);
+    if (cached) {
+      return JSON.parse(cached) as AliasRow[];
+    }
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const rows = await (this.prisma as any).modelAlias.findMany({
+      where: { scope, scopeId, isActive: true },
+      orderBy: [{ priority: 'desc' }, { createdAt: 'desc' }],
+    }) as AliasRow[];
+
+    await this.redis.set(cacheKey, JSON.stringify(rows), CACHE_TTL_SECONDS);
+    return rows;
+  }
+
+  private findMatch(aliases: AliasRow[], model: string): AliasRow | null {
     const exact = aliases.find(a => a.fromPattern === model);
     if (exact) return exact;
-
-    // Glob match
     return aliases.find(a => globMatch(model, a.fromPattern)) ?? null;
   }
 }

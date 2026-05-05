@@ -1,0 +1,48 @@
+{
+  "request": {
+    "input": {
+      "model": "llama3",
+      "messages": [
+        { "role": "user", "content": "Hello" }
+      ],
+      "stream": true,
+      "temperature": 0.8,
+      "max_tokens": 200
+    },
+    "expected": {
+      "model": "llama3",
+      "messages": [{ "role": "user", "content": "Hello" }],
+      "stream": true,
+      "options": { "temperature": 0.8, "num_predict": 200 }
+    }
+  },
+  "request_no_options": {
+    "input": {
+      "model": "llama3",
+      "messages": [{ "role": "user", "content": "Hi" }]
+    },
+    "expected": {
+      "model": "llama3",
+      "messages": [{ "role": "user", "content": "Hi" }],
+      "stream": false
+    }
+  },
+  "response": {
+    "input": {
+      "model": "llama3",
+      "message": { "role": "assistant", "content": "Hello back!" },
+      "done": true,
+      "prompt_eval_count": 10,
+      "eval_count": 4
+    },
+    "expected": {
+      "object": "chat.completion",
+      "choices": [{
+        "index": 0,
+        "message": { "role": "assistant", "content": "Hello back!" },
+        "finish_reason": "stop"
+      }],
+      "usage": { "prompt_tokens": 10, "completion_tokens": 4, "total_tokens": 14 }
+    }
+  }
+}
