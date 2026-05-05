@@ -4,6 +4,14 @@ Log các quyết định kỹ thuật quan trọng của project AIHub.
 
 ---
 
+### [2026-05-04] Replace LiteLLM with Custom Provider Adapter (ADR-0013)
+
+**Context:** Sau Phase 2 vận hành thực tế, LiteLLM bộc lộ 4 hạn chế: model string mismatch khi Claude Code CLI hardcode `claude-*`, config YAML không có UI, không hỗ trợ per-team/per-key routing, HTTP hop 5–15ms overhead.
+**Decision:** Phase 3 thay LiteLLM bằng 3 module in-process trong NestJS: `ModelRouterModule` (alias cascade ORG→TEAM→KEY, combo fallback/round-robin), `FormatTranslatorModule` (port từ `open-sse` MIT), `ProviderAdapterModule` (28+ provider HTTP clients, generic OpenAI-compatible class). Design inspired by [9router](https://github.com/decolua/9router).
+**Consequences:** Build:buy ratio tăng từ 40:60 → 60:40. Latency giảm ~5–15ms. Multi-tenant alias/combo là first-class. Tài liệu: `docs/adr/ADR-0013-provider-adapter-replace-litellm.md`, `docs/provider-adapter-design.md`.
+
+---
+
 ### [2026-04-23] Phase 3 LDAP Scope Exception for 3F→3K Completion
 
 **Context:** Kế hoạch `phase3-3f-3k-completion` yêu cầu hoàn tất rollout stop-loss gates nhưng loại trừ `TASK-350` (Keycloak LDAP/AD sync) khỏi phạm vi triển khai hiện tại.

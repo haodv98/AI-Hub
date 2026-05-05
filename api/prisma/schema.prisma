@@ -69,6 +69,17 @@ enum AuditAction {
   POLICY_DELETE
 }
 
+enum AliasScope {
+  ORG
+  TEAM
+  KEY
+}
+
+enum ComboStrategy {
+  FALLBACK
+  ROUND_ROBIN
+}
+
 // ── Models ───────────────────────────────────────────────────────────────────
 
 model User {
@@ -94,15 +105,17 @@ model User {
 }
 
 model Team {
-  id                String   @id @default(uuid())
-  name              String   @unique
-  description       String?
-  monthlyBudgetUsd  Float    @default(0) @map("monthly_budget_usd")
-  createdAt         DateTime @default(now()) @map("created_at")
-  updatedAt         DateTime @updatedAt @map("updated_at")
+  id                   String   @id @default(uuid())
+  name                 String   @unique
+  description          String?
+  monthlyBudgetUsd     Float    @default(0) @map("monthly_budget_usd")
+  modelAliasesQuick    Json?    @map("model_aliases_quick")
+  createdAt            DateTime @default(now()) @map("created_at")
+  updatedAt            DateTime @updatedAt @map("updated_at")
 
-  members   TeamMember[]
-  policies  Policy[]
+  members      TeamMember[]
+  policies     Policy[]
+  providerKeys ProviderKey[]
 
   @@map("teams")
 }
@@ -167,21 +180,59 @@ model ApiKey {
 }
 
 model ProviderKey {
-  id         String           @id @default(uuid())
-  provider   ProviderType
-  scope      ProviderKeyScope @default(SHARED)
-  userId     String?          @map("user_id")   // null = shared; set = per-seat
-  vaultPath  String           @map("vault_path")
-  isActive   Boolean          @default(true) @map("is_active")
-  assignedAt DateTime         @default(now()) @map("assigned_at")
-  createdAt  DateTime         @default(now()) @map("created_at")
-  updatedAt  DateTime         @updatedAt @map("updated_at")
+  id            String           @id @default(uuid())
+  provider      ProviderType
+  scope         ProviderKeyScope @default(SHARED)
+  userId        String?          @map("user_id")
+  teamId        String?          @map("team_id")
+  vaultPath     String           @map("vault_path")
+  providerAlias String?          @map("provider_alias")
+  baseUrl       String?          @map("base_url")
+  quota         Json?
+  isActive      Boolean          @default(true) @map("is_active")
+  assignedAt    DateTime         @default(now()) @map("assigned_at")
+  createdAt     DateTime         @default(now()) @map("created_at")
+  updatedAt     DateTime         @updatedAt @map("updated_at")
 
   user User? @relation(fields: [userId], references: [id], onDelete: Cascade)
+  team Team? @relation(fields: [teamId], references: [id], onDelete: SetNull)
 
   @@index([provider, scope, isActive])
   @@index([userId, provider])
   @@map("provider_keys")
+}
+
+model ModelAlias {
+  id              String     @id @default(uuid())
+  scope           AliasScope
+  scopeId         String?    @map("scope_id")
+  fromPattern     String     @map("from_pattern")
+  toProviderModel String     @map("to_provider_model")
+  priority        Int        @default(100)
+  isActive        Boolean    @default(true) @map("is_active")
+  description     String?
+  createdAt       DateTime   @default(now()) @map("created_at")
+  updatedAt       DateTime   @updatedAt @map("updated_at")
+
+  @@index([scope, scopeId, isActive])
+  @@index([fromPattern])
+  @@map("model_aliases")
+}
+
+model ProviderCombo {
+  id          String        @id @default(uuid())
+  name        String        @unique
+  models      Json
+  strategy    ComboStrategy @default(FALLBACK)
+  stickyLimit Int           @default(10) @map("sticky_limit")
+  scope       AliasScope    @default(ORG)
+  scopeId     String?       @map("scope_id")
+  isActive    Boolean       @default(true) @map("is_active")
+  createdAt   DateTime      @default(now()) @map("created_at")
+  updatedAt   DateTime      @updatedAt @map("updated_at")
+
+  @@index([scope, scopeId, isActive])
+  @@map("provider_combos")
 }
 
 model AuditLog {

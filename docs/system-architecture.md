@@ -1,8 +1,8 @@
 # AIHub — Kiến trúc hệ thống
 
-**Phiên bản**: 1.0  
-**Cập nhật**: 2026-04-18  
-**Trạng thái**: Phase 2 (MVP)
+**Phiên bản**: 1.1  
+**Cập nhật**: 2026-05-04  
+**Trạng thái**: Phase 2 (MVP) — provider adapter migration scheduled cho Phase 3
 
 ---
 
@@ -34,7 +34,13 @@ graph TB
         KC[Keycloak\nIdentity Provider]
         GW[APISix\nEdge Gateway]
         NS[NestJS API\nBusiness Logic]
-        LL[LiteLLM Proxy\nProvider Adapter]
+
+        subgraph PADAPT["Provider Adapter Layer (replaces LiteLLM — Phase 3)"]
+            direction TB
+            MR[ModelRouter\nalias + combo resolver]
+            FT[FormatTranslator\nclaude ↔ openai ↔ gemini]
+            PA[ProviderAdapter\nper-provider HTTP clients]
+        end
 
         subgraph STORAGE["Storage & Infrastructure"]
             PG[(PostgreSQL\n+ TimescaleDB)]
@@ -52,7 +58,10 @@ graph TB
     subgraph L3["Layer 3 — AI Providers"]
         AN[Anthropic]
         OA[OpenAI]
-        GG[Google AI]
+        GG[Google AI / Gemini]
+        OR[OpenRouter]
+        DS[DeepSeek / Groq / xAI / ...]
+        OL[Ollama local]
     end
 
     CUR -->|"internal API key\nport 9080"| GW
@@ -61,14 +70,19 @@ graph TB
 
     KC -.->|"JWKS / token verify"| GW
     GW --> NS
-    NS --> LL
+    NS --> MR
+    MR --> FT
+    FT --> PA
     NS --> PG
     NS --> RD
     NS --> VT
 
-    LL --> AN
-    LL --> OA
-    LL --> GG
+    PA --> AN
+    PA --> OA
+    PA --> GG
+    PA --> OR
+    PA --> DS
+    PA --> OL
 
     NS --> LK
     GW --> PR
@@ -100,7 +114,8 @@ sequenceDiagram
     participant NS as NestJS API
     participant RD as Redis
     participant PG as PostgreSQL
-    participant LL as LiteLLM
+    participant MR as ModelRouter
+    participant PA as ProviderAdapter
     participant PR as AI Provider
 
     C->>GW: POST /v1/chat/completions<br/>Header: Authorization: aihub_dev_xxx
@@ -130,11 +145,19 @@ sequenceDiagram
         NS->>NS: Rewrite model to fallback model
     end
 
-    Note over NS: Layer 4: Provider proxy
-    NS->>LL: POST /chat/completions<br/>(enriched request)
-    LL->>PR: Call provider API\n(with real provider key from Vault)
-    PR-->>LL: Response
-    LL-->>NS: Response
+    Note over NS: Layer 4: Model resolution
+    NS->>MR: resolveAlias(model, ctx)
+    MR-->>NS: "anthropic/claude-sonnet-4-5" (or combo)
+
+    Note over NS: Layer 5: Provider forwarding
+    NS->>PA: forward(providerModel, body)
+    PA->>PR: Call provider API\n(key from Vault, format translated)
+    PR-->>PA: Response
+    PA-->>NS: Translated response
+
+    alt Provider error + combo has fallback
+        PA->>PR: Retry with next combo model
+    end
 
     par Async (non-blocking)
         NS->>PG: INSERT usage_event (hypertable)
@@ -219,6 +242,9 @@ graph LR
 ```mermaid
 graph TB
     NS[NestJS API] --> GM[GatewayModule\nProxy + auth key]
+    NS --> MRM[ModelRouterModule\nalias + combo resolver]
+    NS --> FTM[FormatTranslatorModule\nclaude ↔ openai ↔ gemini]
+    NS --> PAM[ProviderAdapterModule\nper-provider HTTP clients]
     NS --> UM[UsersModule\nCRUD + offboard]
     NS --> TM[TeamsModule\nTeams + members]
     NS --> KM[KeysModule\nGenerate / rotate / revoke]
@@ -226,6 +252,10 @@ graph TB
     NS --> USM[UsageModule\nQuery TimescaleDB]
     NS --> AUD[AuditModule\nFire-and-forget log]
 
+    GM --> MRM
+    MRM --> FTM
+    FTM --> PAM
+    PAM --> VT[(Vault\nprovider keys)]
     GM --> RD[(Redis\nkey cache + rate limit)]
     KM --> PG[(PostgreSQL)]
     PM --> RD
@@ -241,24 +271,50 @@ graph TB
 
 ---
 
-### 3.4 LiteLLM Proxy — Provider Adapter
+### 3.4 Provider Adapter Layer — replaces LiteLLM (Phase 3)
 
 ```mermaid
 graph LR
-    LL[LiteLLM] --> A[Unified OpenAI format\n→ provider-specific format]
-    LL --> B[Lấy provider key\ntừ env / Vault]
-    LL --> C[Retry logic\nvà timeout handling]
-    LL --> D["Anthropic\n/messages → /chat/completions"]
-    LL --> E["OpenAI\n/chat/completions"]
-    LL --> F["Google AI\nGenerateContent → /chat/completions"]
+    subgraph PA_LAYER["Provider Adapter Layer (in-process NestJS modules)"]
+        MR[ModelRouter] --> FT[FormatTranslator]
+        FT --> PA[ProviderAdapter dispatcher]
+        PA --> A1[AnthropicAdapter]
+        PA --> A2[OpenAIAdapter]
+        PA --> A3[GeminiAdapter]
+        PA --> A4[OpenRouterAdapter]
+        PA --> A5[DeepSeek / Groq / xAI / Mistral / ...]
+        PA --> A6[OllamaAdapter local]
+    end
 ```
 
-**Nhiệm vụ chính:**
-- Nhận request format OpenAI từ NestJS
-- Translate sang format native của từng provider
-- Trả về response format OpenAI chuẩn (nhân viên không biết đang dùng provider nào)
+**Tại sao thay LiteLLM?**
 
-**Không làm:** LiteLLM không làm auth, không làm policy. Đây chỉ là translation layer.
+LiteLLM Proxy đã phục vụ Phase 1–2 nhưng bộc lộ 4 hạn chế trong vận hành thực tế:
+
+1. **Model string mismatch**: Claude Code CLI hardcode gửi `model: "claude-sonnet-4-5"`. LiteLLM yêu cầu exact provider model id và không hỗ trợ alias flexible per-team / per-key.
+2. **Config phức tạp, không UI**: `config.yaml` phải định nghĩa thủ công mọi mapping. IT Admin phải sửa YAML và redeploy LiteLLM mỗi khi thêm model.
+3. **Multi-provider routing yếu**: Không thể assign "team A dùng Gemini, team B dùng OpenAI, key C fallback OpenRouter" theo dạng per-team / per-key.
+4. **Single point dependency**: Third-party Python service, HTTP hop thêm 5–15ms, customization hạn chế.
+
+**Ba module thay thế (in-process NestJS, TypeScript):**
+
+| Module | Trách nhiệm |
+|--------|-------------|
+| **ModelRouter** | Resolve model alias theo cascade `key → team → org → passthrough`. Resolve `ProviderCombo` (fallback / round-robin). Parse provider string `"anthropic/claude-sonnet-4-5"` → `{ provider, model }`. |
+| **FormatTranslator** | Detect input format (`anthropic` / `openai` / `gemini`). Translate request/response body. Hỗ trợ streaming SSE. Port logic từ `open-sse` npm (MIT). |
+| **ProviderAdapter** | Dispatcher gọi adapter cụ thể. Mỗi adapter implement chung interface `forward(model, body, providerKey, baseUrl?) → response`. |
+
+**Provider scope trong Phase 3:**
+
+API-key providers: Anthropic, OpenAI, Gemini, OpenRouter, DeepSeek, Groq, xAI, Mistral, Perplexity, Together AI, Fireworks, Cerebras, Cohere, NVIDIA, Nebius, SiliconFlow, Hyperbolic, GLM, Kimi, MiniMax, Alibaba, Volcengine Ark, BytePlus, Azure OpenAI, Vertex AI, Ollama (local), Blackbox, Chutes, Cloudflare AI.
+
+Subscription/OAuth providers (Kiro, Copilot, Cursor) — đánh giá trong Phase 4.
+
+**Provider string format:** `"<provider-alias>/<model-id>"`, ví dụ: `"anthropic/claude-sonnet-4-5"`, `"gemini/gemini-2.5-flash"`, `"openrouter/meta-llama/llama-3.1-405b-instruct"`.
+
+**Không làm:** Provider Adapter Layer không xử lý auth, policy hoặc usage tracking. Những logic này vẫn nằm ở NestJS GatewayService.
+
+Chi tiết implementation: xem `docs/provider-adapter-design.md` và `docs/adr/ADR-0013-provider-adapter-replace-litellm.md`.
 
 ---
 
@@ -484,18 +540,30 @@ Với caching đúng, overhead của NestJS < **5ms** trên happy path.
 
 ---
 
-### 5.4 🟡 Rủi ro trung bình — LiteLLM là dependency nặng
+### 5.4 🟡 Rủi ro trung bình — Provider Adapter là code tự vận hành (Phase 3+)
 
-**Mô tả:** LiteLLM Proxy là third-party library. Nếu LiteLLM ngừng maintain, thay đổi API breaking, hoặc có security issue, toàn bộ provider routing bị ảnh hưởng.
+**Mô tả:** Phase 3 thay LiteLLM bằng `ProviderAdapter` tự build (xem ADR-0013). Lợi ích là full control, multi-tenant aware, và alias/combo first-class — nhưng đội phải tự maintain adapter code khi provider thay đổi API.
 
 **Hệ thống đã làm:**
-- LiteLLM hoàn toàn tách biệt sau NestJS — interface chỉ là HTTP OpenAI format
-- NestJS không gọi LiteLLM SDK trực tiếp — chỉ HTTP POST
 
-**Nếu cần thay thế LiteLLM:**
-- Viết adapter riêng cho từng provider (OpenAI SDK, Anthropic SDK)
-- Thay đổi chỉ ở `GatewayService` — không ảnh hưởng policy, auth, usage tracking
-- Estimated effort: 2–3 sprint
+| Giải pháp | Chi tiết |
+|-----------|----------|
+| Common adapter interface | Mọi adapter implement chung `ProviderAdapter` interface — thêm provider mới ~150 LOC |
+| OpenRouter universal fallback | Khi adapter cụ thể chưa kịp update, route qua OpenRouter (200+ models) |
+| FormatTranslator pure functions | Translation logic là pure, dễ unit test, port từ `open-sse` (MIT) |
+| Contract test per provider | Smoke test định kỳ chạy nhỏ request lên mỗi provider để phát hiện breaking change sớm |
+| Admin Portal alias UI | Khi provider đổi model id, IT Admin chỉ cần update alias — không cần redeploy |
+
+**So sánh trước/sau:**
+
+| Khía cạnh | LiteLLM (Phase 1–2) | ProviderAdapter (Phase 3+) |
+|-----------|---------------------|---------------------------|
+| Process boundary | Separate Python service | In-process NestJS module |
+| Config | `config.yaml` static | DB-driven với Admin UI |
+| Multi-tenant scope | Không | Có (ORG / TEAM / KEY) |
+| Translator | LiteLLM internal | Port từ `open-sse` (MIT) |
+| Latency overhead | ~5–15ms HTTP hop | ~1–3ms in-process |
+| Maintenance | Low (third-party) | Medium (own code) |
 
 ---
 
@@ -536,7 +604,10 @@ gantt
     Policy engine                  :active, 2026-04, 2026-06
 
     section Phase 3 (Q3 2026)
-    HA on-prem (2 APISix + 2 NestJS)   :2026-07, 2026-09
+    Provider Adapter replace LiteLLM   :2026-07, 2026-09
+    Model alias + combo system         :2026-07, 2026-08
+    FormatTranslator open-sse port     :2026-07, 2026-08
+    HA on-prem (2 APISix + 2 NestJS)   :2026-08, 2026-09
     IP restriction per key             :2026-07, 2026-08
     Key expiry tự động                 :2026-07, 2026-08
     Slack integration alert            :2026-08, 2026-09
@@ -555,6 +626,6 @@ gantt
 | Key tập trung bị hack | SHA-256 + Vault | IP restriction, key expiry | HSM, anomaly detection |
 | Single point of failure | Health check, restart policy | 2-node HA | K8s multi-AZ |
 | Gateway bottleneck | Redis cache < 5ms overhead | NestJS scale ngang | K8s HPA |
-| LiteLLM dependency | HTTP interface isolation | Custom adapter option | Multi-adapter |
+| LiteLLM dependency | HTTP interface isolation | **Replaced** by ProviderAdapter (ADR-0013) | Generated adapters from OpenAPI |
 | Vault downtime | 1h memory cache | Vault HA cluster | Managed secret store |
 | Privacy logging | Metadata-only default | Content inspection opt-in | PII detection (optional) |

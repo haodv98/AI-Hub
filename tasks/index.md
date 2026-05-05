@@ -19,7 +19,7 @@
 | Identity Provider | **Keycloak** |
 | Backend | **NestJS + TypeScript** |
 | ORM | **Prisma** |
-| Provider Adapter | LiteLLM Proxy |
+| Provider Adapter | **Custom NestJS (ModelRouter + FormatTranslator + ProviderAdapter)** — replaces LiteLLM (ADR-0013) |
 | Primary DB | PostgreSQL 16 + TimescaleDB |
 | Cache / Counters | Redis 7 |
 | Secrets | HashiCorp Vault |
@@ -45,6 +45,7 @@
 | [phase1-foundation.md](phase1-foundation.md) | Phase 1 (Week 1–3) | Infra, Prisma schema, APISix+Keycloak, NestJS scaffold, LiteLLM, key mgmt |
 | [phase2-mvp.md](phase2-mvp.md) | Phase 2 (Week 4–6) | Policy engine (NestJS modules), Admin Portal, Pilot |
 | [phase3-rollout.md](phase3-rollout.md) | Phase 3 (Week 7–10) | All-team rollout, SMTP email notifications, HR webhook, SSO, Monitoring (Prometheus/Loki/Grafana), on-prem K8s, CloudWatch, daily backup |
+| [phase3-provider-adapter.md](phase3-provider-adapter.md) | Phase 3 (Week 7–10) | Provider Adapter Layer — ModelRouter, FormatTranslator, 29 provider adapters, LiteLLM retirement (TASK-400 đến TASK-446) |
 | [phase4-optimization.md](phase4-optimization.md) | Phase 4 (Week 11–16) | Cost optimization, advanced features, analytics, cloud migration prep |
 | [cross-cutting.md](cross-cutting.md) | Ongoing | Testing, ADR maintenance |
 
@@ -82,4 +83,4 @@ TASK-214 → Phase 2 Admin UI → Phase 3 Rollout
 - Backend: TASK-060–062 (Budget module) + TASK-084 (integration tests)
 - Frontend: TASK-250, 260–263 (Dashboard + Teams + Members pages)
 
-## Total Tasks: ~110
+## Total Tasks: ~157 (110 original + 47 Provider Adapter)

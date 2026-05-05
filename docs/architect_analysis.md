@@ -1,10 +1,10 @@
 # AI Engine Resource Manager — Architecture Analysis
 
 > **Project codename:** AIHub  
-> **Version:** 1.0  
-> **Last updated:** 2026-04-17  
+> **Version:** 1.1  
+> **Last updated:** 2026-05-04  
 > **Author:** CTO Office  
-> **Status:** Draft — Pending review
+> **Status:** Updated — Phase 3 provider adapter migration approved (ADR-0013)
 
 ---
 
@@ -57,20 +57,68 @@ Kiến trúc gồm 3 tầng:
 
 **Responsibility:** Nhận mọi AI API request từ nhân viên, authenticate, authorize theo policy, route tới đúng provider, track usage.
 
-**Technology options:**
+Kiến trúc tách thành 2 lớp tách biệt:
 
-| Option | Pros | Cons | Recommendation |
-|--------|------|------|----------------|
-| LiteLLM Proxy | Sẵn provider adapters, OpenAI-compatible API, cost tracking built-in | Limited custom auth, scaling phụ thuộc maintainer | MVP — dùng cho pilot |
-| Kong Gateway + custom plugins | Enterprise-grade, plugin ecosystem, horizontal scaling | Phức tạp hơn, cần viết custom Lua/Go plugins | Production — long-term |
-| Custom Go service | Full control, tối ưu performance, exact fit | Effort cao, phải viết provider adapters | Chỉ khi Kong không đủ |
+- **Edge layer:** APISix — TLS termination, IP allowlist, rate limit cấp gateway, metrics export.
+- **Application layer:** NestJS API + Provider Adapter Layer — auth bằng SHA-256, policy engine, model alias resolution, format translation, provider forwarding.
 
-**Recommended path:** Bắt đầu với LiteLLM Proxy cho MVP (2–4 tuần), migrate sang Kong-based khi scale lên toàn công ty.
+**Technology decisions (đã chốt):**
 
-**Request flow:**
+| Component | Technology | Status |
+|-----------|-----------|--------|
+| Edge gateway | **APISix** | Accepted (ADR-0012) |
+| Identity provider | **Keycloak** (OIDC) | Accepted (ADR-0012) |
+| Backend | **NestJS + TypeScript + Prisma** | Accepted (ADR-0009) |
+| Provider adapter (Phase 1–2) | LiteLLM Proxy | Deprecated — xem ADR-0013 |
+| Provider adapter (Phase 3+) | **Custom ModelRouter + FormatTranslator + ProviderAdapter** (9router-inspired) | Accepted (ADR-0013) |
+
+**Tại sao thay LiteLLM ở Phase 3?**
+
+Sau Phase 1–2 vận hành thực tế:
+1. Claude Code CLI hardcode `model: "claude-sonnet-4-5"`, LiteLLM không hỗ trợ alias flexible per-team / per-key.
+2. LiteLLM `config.yaml` không phải first-class citizen trong Admin Portal — IT Admin phải sửa file YAML và redeploy.
+3. Routing rule "team A dùng Gemini, team B dùng OpenAI, key C fallback OpenRouter" không khả thi với LiteLLM.
+4. Third-party dependency với customization hạn chế.
+
+Inspired by [9router](https://github.com/decolua/9router) (open-source, MIT), AI Hub xây 3 module in-process: **ModelRouter** (alias + combo), **FormatTranslator** (port từ `open-sse`), **ProviderAdapter** (per-provider HTTP clients). Chi tiết: `docs/provider-adapter-design.md`.
+
+**Recommended path (updated):** Phase 1–2 dùng LiteLLM cho nhanh; Phase 3 migrate sang Custom Provider Adapter để đáp ứng multi-tenant alias/combo requirements.
+
+**Request flow (updated):**
 
 ```
-Employee (Cursor/CLI/Web)
+Employee (Cursor / CLI / Web)
+    │
+    │  POST /v1/chat/completions
+    │  Header: Authorization: Bearer <internal-key>
+    │  Body: { model: "claude-sonnet-4-5", messages: [...] }
+    │
+    ▼
+┌─ APISix Edge Gateway ────────────────────────────┐
+│  TLS, IP allowlist, gateway-level rate limit     │
+└────────────────┬─────────────────────────────────┘
+                 │
+                 ▼
+┌─ NestJS API ─────────────────────────────────────┐
+│  1. ApiKeyGuard: SHA-256 lookup (Redis cache)    │
+│  2. PoliciesService.resolveEffectivePolicy()     │
+│  3. RateLimitService.checkRateLimit()            │
+│  4. BudgetService.checkAndEnforceBudget()        │
+│  5. ModelRouter.resolveAlias(model, ctx)         │
+│     "claude-sonnet-4-5" → "anthropic/claude-..." │
+│     (lookup: key → team → org → passthrough)     │
+│  6. ModelRouter.resolveCombo() (if combo)        │
+│  7. FormatTranslator.translateRequest()          │
+│  8. ProviderAdapter.forward(provider, body, key) │
+│  9. FormatTranslator.translateResponse()         │
+│ 10. UsageService.recordEvent() (async)           │
+└──────────────────────────────────────────────────┘
+```
+
+**Latency budget:** Step 1–9 phải hoàn thành trong < 30ms. ProviderAdapter in-process tiết kiệm ~5–15ms so với LiteLLM HTTP hop.
+
+```
+Employee (Cursor/CLI/Web) [LEGACY — giữ lại để tham khảo]
     │
     │  POST /v1/chat/completions
     │  Header: Authorization: Bearer <internal-key>
@@ -567,25 +615,58 @@ Bot notifications:
 | Portkey AI Gateway | Unified API, caching, fallbacks | SaaS-only concerns cho security-sensitive deployment |
 | Each provider's admin (Claude Teams, OpenAI org) | Per-provider team management | Phân mảnh, no unified view, no cross-provider policy |
 
-### 7.2. Recommended approach: build on LiteLLM core
+### 7.2. Recommended approach (updated for Phase 3)
 
 ```
 Build custom:
-  ├─ Admin Portal (React)
-  ├─ Auth & Key Management Service
-  ├─ Policy Engine
+  ├─ Admin Portal (React + shadcn/ui)
+  ├─ Auth & Key Management Service (NestJS)
+  ├─ Policy Engine (NestJS)
   ├─ HR/Slack integration layer
-  └─ Usage dashboard (Grafana hoặc custom)
+  ├─ Usage dashboard
+  ├─ ModelRouter (alias + combo resolver)          ← NEW (Phase 3)
+  ├─ ProviderAdapter (28+ provider clients)        ← NEW (Phase 3)
+  └─ Custom seat-based tool inventory
 
 Use off-the-shelf:
-  ├─ LiteLLM Proxy (gateway + provider adapters)
-  ├─ PostgreSQL (data store)
-  ├─ Redis (rate limiting)
-  ├─ HashiCorp Vault (secrets)
-  └─ Grafana (monitoring)
+  ├─ APISix (edge gateway)
+  ├─ Keycloak (OIDC)
+  ├─ PostgreSQL + TimescaleDB
+  ├─ Redis 7
+  ├─ HashiCorp Vault
+  ├─ Prometheus + Grafana + Loki
+  └─ open-sse npm package (port translator logic — MIT)
 ```
 
-Tỉ lệ build:buy ước tính **40:60** — phần lớn infrastructure dùng tools có sẵn, custom code tập trung vào business logic (policy engine, key management, admin UI).
+Tỉ lệ build:buy ước tính cập nhật: **60:40** (trước đây 40:60). Lý do: Phase 3 chuyển provider adapter từ off-the-shelf (LiteLLM) sang custom code. Tuy nhiên cấu trúc adapter rất modular và translator được port từ `open-sse` (MIT) nên effort không nhân đôi.
+
+**Build vs buy decision matrix (updated):**
+
+| Component | Decision | Rationale |
+|-----------|----------|-----------|
+| Edge gateway | **Buy** (APISix) | Battle-tested, plugin ecosystem |
+| Identity | **Buy** (Keycloak) | Standard OIDC, LDAP/Google integration |
+| Backend framework | **Buy** (NestJS) | TS-native, modular |
+| ORM | **Buy** (Prisma) | Type-safe, excellent DX |
+| Internal API key auth | **Build** | Custom hash format, lookup logic |
+| Policy engine | **Build** | Domain-specific cascade |
+| Provider adapter | **Build** (Phase 3) | LiteLLM không đáp ứng multi-tenant + alias requirements |
+| Translator logic | **Port** (`open-sse`) | MIT license, proven in 9router |
+| Time-series DB | **Buy** (TimescaleDB) | PostgreSQL extension |
+| Secret manager | **Buy** (Vault) | Industry standard |
+
+### 7.3. 9router as architectural reference
+
+[9router](https://github.com/decolua/9router) là một open-source Next.js tool dạng single-user MITM proxy cho LLM traffic. AI Hub không fork 9router (kiến trúc single-user, MITM, DNS config không phù hợp multi-tenant), nhưng **port 4 design idea cốt lõi:**
+
+| Idea từ 9router | Áp dụng vào AI Hub |
+|-----------------|---------------------|
+| Model alias system | Mở rộng thành multi-tenant với scope ORG/TEAM/KEY |
+| Provider Combo (fallback / round-robin) | Áp dụng nguyên, thêm tenant isolation |
+| Provider string format `"alias/model-id"` | Dùng làm canonical format cho upstream |
+| `open-sse` translator package | Port sang TypeScript module trong NestJS |
+
+**Không port:** UI Next.js (single-user), MITM proxy, DNS hijack config, local file persistence.
 
 ---
 
