@@ -18,12 +18,18 @@
 
 ## Current Phase
 
-**Phase 2 — Active Development** — Infra hoàn chỉnh, NestJS scaffold xong, DB migrations đã deploy, seed data hoạt động. Đang chuẩn hoá API (response format, pagination, auth guard).
+**Phase 3 — Provider Adapter Sprint 3** — Sprint 1 & 2 hoàn thành. ProviderAdapterModule wired vào AppModule. FormatTranslator 23 unit tests pass. 4 core adapters (Anthropic, Gemini, OpenAI-compatible, OpenRouter) implemented. Đang bắt đầu Sprint 3: ProviderComboService (fallback + round-robin), CRUD /admin/combos, 20 OpenAI-compatible adapters.
+
+Sprint 2 bugs fixed (2026-05-06):
+- ProviderAdapterService.translateResponse direction bug
+- GeminiAdapter URL construction (?key= vs &key=)
+- OpenAICompatibleAdapter empty API key fallback
+- Model name not overridden với resolvedModel
 
 Milestones:
 - Week 3: Phase 1 complete (Infra + NestJS scaffold + Key mgmt) ✓
-- Week 6: Phase 2 MVP (Policy Engine + Admin Portal + 2 pilot teams) ← current
-- Week 10: Phase 3 Company Rollout (9 teams)
+- Week 6: Phase 2 MVP (Policy Engine + Admin Portal + 2 pilot teams) ✓
+- Week 10: Phase 3 Company Rollout (9 teams) ← current (Provider Adapter Sprint 3)
 - Week 16: Phase 4 Optimization (giảm 20% cost)
 
 ## Success Metrics

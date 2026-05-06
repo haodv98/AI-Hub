@@ -13,21 +13,24 @@ export class OpenAICompatibleAdapter extends ProviderAdapter {
     private readonly authHeaderName = 'Authorization',
     private readonly authPrefix = 'Bearer ',
     private readonly extraHeaders: Record<string, string> = {},
+    private readonly chatPath = '/chat/completions',
   ) {
     super();
   }
 
   async forward(params: AdapterForwardParams): Promise<AdapterForwardResult> {
-    const apiKey = params.vaultPath
-      ? await this.vault.readSecret(params.vaultPath, 'api_key')
-      : '';
+    const vaultPath = params.vaultPath ?? `kv/aihub/providers/${this.providerAlias}/shared`;
+    // Skip Vault read when no auth is configured (e.g. local Ollama)
+    const apiKey = this.authPrefix === ''
+      ? ''
+      : await this.vault.readSecret(vaultPath, 'api_key');
 
     const baseUrl = params.vaultPath
       ? await this.vault.readSecret(params.vaultPath, 'base_url').catch(() => this.defaultBaseUrl)
       : this.defaultBaseUrl;
 
     try {
-      const response = await axios.post(`${baseUrl}/chat/completions`, params.body, {
+      const response = await axios.post(`${baseUrl}${this.chatPath}`, params.body, {
         headers: {
           [this.authHeaderName]: `${this.authPrefix}${apiKey}`,
           'content-type': 'application/json',

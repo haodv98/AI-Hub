@@ -8,9 +8,10 @@ import { PoliciesModule } from '../policies/policies.module';
 import { UsageModule } from '../usage/usage.module';
 import { MetricsModule } from '../metrics/metrics.module';
 import { ModelRouterModule } from '../model-router/model-router.module';
+import { ProviderAdapterModule } from '../provider-adapter/provider-adapter.module';
 
 @Module({
-  imports: [KeysModule, BudgetModule, PoliciesModule, UsageModule, MetricsModule, ModelRouterModule],
+  imports: [KeysModule, BudgetModule, PoliciesModule, UsageModule, MetricsModule, ModelRouterModule, ProviderAdapterModule],
   providers: [GatewayService, ApiKeyGuard],
   controllers: [GatewayController],
 })

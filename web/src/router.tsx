@@ -12,6 +12,9 @@ import PolicyEditor from '@/pages/PolicyEditor';
 import Usage from '@/pages/Usage';
 import AuditLogs from '@/pages/AuditLogs';
 import Reports from '@/pages/Reports';
+import Aliases from '@/pages/Aliases';
+import Combos from '@/pages/Combos';
+import ProviderKeys from '@/pages/ProviderKeys';
 import Settings from '@/pages/Settings';
 import NotFound from '@/pages/NotFound';
 
@@ -60,6 +63,30 @@ export const router = createBrowserRouter([
         element: (
           <AdminOnly>
             <PolicyEditor />
+          </AdminOnly>
+        ),
+      },
+      {
+        path: 'aliases',
+        element: (
+          <AdminOnly>
+            <Aliases />
+          </AdminOnly>
+        ),
+      },
+      {
+        path: 'combos',
+        element: (
+          <AdminOnly>
+            <Combos />
+          </AdminOnly>
+        ),
+      },
+      {
+        path: 'provider-keys',
+        element: (
+          <AdminOnly>
+            <ProviderKeys />
           </AdminOnly>
         ),
       },

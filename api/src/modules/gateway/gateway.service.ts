@@ -6,11 +6,8 @@ import {
   HttpException,
   HttpStatus,
 } from '@nestjs/common';
-import { ConfigService } from '@nestjs/config';
-import axios, { AxiosResponse } from 'axios';
-import { ProviderType } from '@prisma/client';
+import { ComboStrategy, ProviderType } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
-import { VaultService } from '../../vault/vault.service';
 import { BudgetService } from '../budget/budget.service';
 import { RateLimitService } from '../budget/rate-limit.service';
 import { PricingService } from '../budget/pricing.service';
@@ -18,6 +15,8 @@ import { PoliciesService } from '../policies/policies.service';
 import { UsageService } from '../usage/usage.service';
 import { MetricsService } from '../metrics/metrics.service';
 import { ModelRouterService } from '../model-router/model-router.service';
+import { ProviderAdapterService } from '../provider-adapter/provider-adapter.service';
+import { ProviderComboService, ProviderComboContext } from '../provider-adapter/provider-combo.service';
 
 export interface UserContext {
   id: string;
@@ -25,29 +24,20 @@ export interface UserContext {
   apiKeyId: string;
   teamId: string | null;
   tier: string;
-  /** When set on the API key, gateway uses this LiteLLM model id instead of the client `model` field. */
   defaultUpstreamModel?: string | null;
 }
 
 export interface GatewayResult {
   data: unknown;
   headers: Record<string, string>;
+  stream?: NodeJS.ReadableStream;
 }
 
-type SupportedProvider = 'anthropic' | 'openai' | 'google' | 'cursor' | 'other';
-
-interface ResolvedProviderKey {
-  key: string;
-  scope: 'PER_SEAT' | 'SHARED';
-  gatewayUrl?: string;
-}
-
-const PROVIDER_ENUM_MAP: Record<SupportedProvider, ProviderType> = {
+const ALIAS_TO_PROVIDER_TYPE: Partial<Record<string, ProviderType>> = {
   anthropic: ProviderType.ANTHROPIC,
   openai: ProviderType.OPENAI,
   google: ProviderType.GOOGLE,
-  cursor: ProviderType.CURSOR,
-  other: ProviderType.OTHER,
+  gemini: ProviderType.GOOGLE,
 };
 
 @Injectable()
@@ -56,15 +46,15 @@ export class GatewayService {
 
   constructor(
     private readonly prisma: PrismaService,
-    private readonly vault: VaultService,
     private readonly budget: BudgetService,
     private readonly rateLimit: RateLimitService,
     private readonly pricing: PricingService,
-    private readonly config: ConfigService,
     private readonly policies: PoliciesService,
     private readonly usage: UsageService,
     private readonly metrics: MetricsService,
     private readonly modelRouter: ModelRouterService,
+    private readonly adapterService: ProviderAdapterService,
+    private readonly comboService: ProviderComboService,
   ) {}
 
   async handleRequest(user: UserContext, body: Record<string, unknown>): Promise<GatewayResult> {
@@ -78,7 +68,6 @@ export class GatewayService {
     if (!requestedModel) {
       throw new BadRequestException('Missing model (set on API key or in request body)');
     }
-    const requestedProvider = this.getProvider(requestedModel);
 
     // ── Step 1: Auth validated by ApiKeyGuard ─────────────────────────────
 
@@ -95,7 +84,7 @@ export class GatewayService {
     const rateLimitResult = await this.rateLimit.checkRateLimit(user.id, rpm);
     if (!rateLimitResult.allowed) {
       this.metrics.recordRateLimitRejection(user.tier);
-      this.metrics.recordGatewayRequest(requestedProvider, requestedModel, 'error');
+      this.metrics.recordGatewayRequest('unknown', requestedModel, 'error');
       throw new HttpException('Rate limit exceeded', HttpStatus.TOO_MANY_REQUESTS);
     }
 
@@ -117,145 +106,102 @@ export class GatewayService {
       );
     }
 
-    let actualModel = budgetResult.fallbackModel || requestedModel;
+    const baseModel = budgetResult.fallbackModel || requestedModel;
     const isFallback = !!budgetResult.fallbackModel;
 
-    // ── Step 5b: Provider Adapter routing (feature flag) ─────────────────
-    const adapterEnabled = this.config.get<string>('PROVIDER_ADAPTER_ENABLED', 'false') === 'true';
-    if (adapterEnabled) {
-      try {
-        const resolved = await this.modelRouter.resolveAlias(actualModel, {
-          apiKeyId: user.apiKeyId,
-          teamId: user.teamId ?? undefined,
+    // ── Step 6: Resolve alias → forward via provider adapter ──────────────
+    const resolved = await this.modelRouter.resolveAlias(baseModel, {
+      apiKeyId: user.apiKeyId,
+      teamId: user.teamId ?? undefined,
+      userId: user.id,
+    });
+
+    const provider = this.extractProviderAlias(resolved.providerModel);
+    const vaultPath = await this.resolvePerSeatVaultPath(user.id, provider);
+
+    const context: ProviderComboContext = {
+      userId: user.id,
+      apiKeyId: user.apiKeyId,
+      teamId: user.teamId ?? undefined,
+      vaultPath,
+    };
+
+    let adapterResult: { data: unknown; headers: Record<string, string>; stream?: NodeJS.ReadableStream };
+    try {
+      if (resolved.comboName) {
+        const combo = await this.prisma.providerCombo.findUnique({ where: { name: resolved.comboName } });
+        if (!combo) throw new HttpException(`Combo '${resolved.comboName}' not found`, HttpStatus.BAD_GATEWAY);
+        adapterResult =
+          combo.strategy === ComboStrategy.ROUND_ROBIN
+            ? await this.comboService.executeRoundRobin(combo, body, context)
+            : await this.comboService.executeFallback(combo, body, context);
+      } else {
+        adapterResult = await this.adapterService.forward(resolved.providerModel, body, vaultPath);
+      }
+    } catch (err: unknown) {
+      this.metrics.recordGatewayRequest(provider, resolved.providerModel, 'error');
+      this.metrics.observeGatewayLatency(provider, Date.now() - requestStart);
+      if (err instanceof HttpException) throw err;
+      throw new HttpException('Provider error', HttpStatus.BAD_GATEWAY);
+    }
+
+    // ── Step 7: Record usage (non-streaming only — streaming has no token count upfront) ──
+    if (!body.stream) {
+      const responseData = adapterResult.data as Record<string, unknown> | undefined;
+      const usageData = responseData?.usage as Record<string, number> | undefined;
+      if (usageData) {
+        const promptTokens = usageData.prompt_tokens ?? 0;
+        const completionTokens = usageData.completion_tokens ?? 0;
+        const costUsd = this.pricing.estimateCost(resolved.providerModel, promptTokens, completionTokens);
+        this.usage.recordEvent({
           userId: user.id,
+          teamId: user.teamId,
+          apiKeyId: user.apiKeyId,
+          model: resolved.providerModel,
+          provider,
+          promptTokens,
+          completionTokens,
+          totalTokens: promptTokens + completionTokens,
+          costUsd,
+          latencyMs: Date.now() - requestStart,
         });
-        if (resolved.comboName) {
-          // TODO Sprint 3: ComboService will handle this
-          this.logger.debug(`[ProviderAdapter] COMBO route: ${resolved.comboName} — falling through to LiteLLM`);
-        } else {
-          actualModel = resolved.providerModel;
-          // TODO Sprint 2: ProviderAdapterService.forward(resolved.providerModel, body, ...)
-          this.logger.debug(`[ProviderAdapter] Resolved: ${requestedModel} → ${actualModel}`);
-        }
-      } catch (err: unknown) {
-        this.logger.warn(`[ProviderAdapter] resolveAlias failed, falling back to LiteLLM: ${(err as Error).message}`);
       }
     }
 
-    const provider = this.getProvider(actualModel);
-
-    // ── Step 6: Resolve provider key — per-seat or shared ────────────────
-    const resolved = await this.resolveProviderKey(user.id, provider as SupportedProvider);
-
-    // ── Step 7: Forward to LiteLLM ───────────────────────────────────────
-    const litellmUrl = this.config.get('LITELLM_URL', 'http://localhost:4000');
-    const litellmKey = this.config.get('LITELLM_MASTER_KEY', '');
-
-    const requestBody: Record<string, unknown> = {
-      ...body,
-      model: actualModel,
-      // Per-seat: inject personal key so LiteLLM uses it for the upstream call.
-      // Shared: omit — LiteLLM uses its configured credentials.
-      ...(resolved.scope === 'PER_SEAT' ? { api_key: resolved.key } : {}),
-      metadata: {
-        ...((body.metadata as Record<string, unknown>) ?? {}),
-        userId: user.id,
-        teamId: user.teamId,
-        apiKeyId: user.apiKeyId,
-      },
-    };
-
-    let providerResponse: AxiosResponse;
-    try {
-      providerResponse = await axios.post(`${litellmUrl}/v1/chat/completions`, requestBody, {
-        headers: {
-          Authorization: `Bearer ${litellmKey}`,
-          'Content-Type': 'application/json',
-        },
-        timeout: 300_000,
-        responseType: body.stream ? 'stream' : 'json',
-      });
-    } catch (err: unknown) {
-      const axiosErr = err as { response?: { status?: number; data?: { error?: { message?: string } } } };
-      const status = axiosErr.response?.status ?? 502;
-      const message = axiosErr.response?.data?.error?.message ?? 'Provider error';
-      this.metrics.recordGatewayRequest(provider, actualModel, 'error');
-      this.metrics.observeGatewayLatency(provider, Date.now() - requestStart);
-      throw new HttpException({ success: false, error: { code: 'PROVIDER_ERROR', message } }, status);
-    }
-
-    // ── Step 8: Record usage via UsageService (single source of truth) ────
-    // UsageService handles: TimescaleDB write, budget counter, key.lastUsedAt, alert checks
-    const responseData = providerResponse.data as Record<string, unknown>;
-    const usage = responseData?.usage as Record<string, number> | undefined;
-    if (usage) {
-      const promptTokens = usage.prompt_tokens ?? 0;
-      const completionTokens = usage.completion_tokens ?? 0;
-      const costUsd = this.pricing.estimateCost(actualModel, promptTokens, completionTokens);
-
-      this.usage.recordEvent({
-        userId: user.id,
-        teamId: user.teamId,
-        apiKeyId: user.apiKeyId,
-        model: actualModel,
-        provider,
-        promptTokens,
-        completionTokens,
-        totalTokens: promptTokens + completionTokens,
-        costUsd,
-        latencyMs: Date.now() - requestStart,
-      });
-    }
-    this.metrics.recordGatewayRequest(provider, actualModel, 'success');
+    this.metrics.recordGatewayRequest(provider, resolved.providerModel, 'success');
     this.metrics.observeGatewayLatency(provider, Date.now() - requestStart);
 
-    // ── Step 9: Return with enriched headers ──────────────────────────────
+    // ── Step 8: Return with enriched headers ──────────────────────────────
     return {
-      data: providerResponse.data,
+      data: adapterResult.data,
+      stream: adapterResult.stream,
       headers: {
-        'X-AIHub-Model': actualModel,
+        ...adapterResult.headers,
+        'X-AIHub-Model': resolved.providerModel,
         'X-AIHub-Fallback': String(isFallback),
         'X-AIHub-RateLimit-Remaining': String(rateLimitResult.remaining),
         'X-AIHub-Budget-Pct': String(Math.round(budgetResult.usagePct)),
-        'X-AIHub-Key-Scope': resolved.scope,
       },
     };
   }
 
-  private getProvider(model: string): SupportedProvider {
-    if (model.includes('claude')) return 'anthropic';
-    if (model.includes('gpt') || model.includes('o1') || model.includes('o3')) return 'openai';
-    if (model.includes('gemini')) return 'google';
-    if (model.includes('cursor')) return 'cursor';
-    return 'anthropic';
+  private extractProviderAlias(providerModel: string): string {
+    const slashIdx = providerModel.indexOf('/');
+    if (slashIdx !== -1) return providerModel.slice(0, slashIdx);
+    if (providerModel.includes('claude')) return 'anthropic';
+    if (providerModel.includes('gpt') || providerModel.includes('o1') || providerModel.includes('o3')) return 'openai';
+    if (providerModel.includes('gemini')) return 'google';
+    return 'other';
   }
 
-  private async resolveProviderKey(userId: string, provider: SupportedProvider): Promise<ResolvedProviderKey> {
-    const perSeatRecord = await this.prisma.providerKey.findFirst({
-      where: {
-        userId,
-        provider: PROVIDER_ENUM_MAP[provider],
-        scope: 'PER_SEAT',
-        isActive: true,
-      },
+  private async resolvePerSeatVaultPath(userId: string, providerAlias: string): Promise<string | undefined> {
+    const providerType = ALIAS_TO_PROVIDER_TYPE[providerAlias];
+    if (!providerType) return undefined;
+
+    const record = await this.prisma.providerKey.findFirst({
+      where: { userId, provider: providerType, scope: 'PER_SEAT', isActive: true },
       select: { vaultPath: true },
     });
-
-    if (perSeatRecord) {
-      const key = await this.vault.readSecret(perSeatRecord.vaultPath, 'api_key');
-      let gatewayUrl: string | undefined;
-      if (provider === 'other') {
-        gatewayUrl = await this.vault.readSecret(perSeatRecord.vaultPath, 'gateway_url').catch(() => undefined);
-      }
-      return { key, scope: 'PER_SEAT', gatewayUrl };
-    }
-
-    // CURSOR and OTHER only support PER_SEAT — no shared fallback
-    if (provider === 'cursor' || provider === 'other') {
-      throw new ForbiddenException(`No PER_SEAT provider key configured for ${provider.toUpperCase()}. Ask an IT Admin to assign one.`);
-    }
-
-    const key = await this.vault.getProviderKey(provider as 'anthropic' | 'openai' | 'google');
-    return { key, scope: 'SHARED' };
+    return record?.vaultPath ?? undefined;
   }
 }

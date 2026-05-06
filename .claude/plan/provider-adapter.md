@@ -3,7 +3,7 @@
 > **Feature:** phase3-provider-adapter
 > **Generated:** 2026-05-04
 > **Reference:** `docs/provider-adapter-design.md`, `docs/adr/ADR-0013-provider-adapter-replace-litellm.md`
-> **Task file:** `tasks/phase3-provider-adapter.md`
+> **Task file:** `tasks/phase3-provider-adapter.md, tasks/ui-implementation.md`
 
 ---
 

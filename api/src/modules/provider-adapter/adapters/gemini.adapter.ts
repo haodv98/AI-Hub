@@ -23,8 +23,9 @@ export class GeminiAdapter extends ProviderAdapter {
     const modelId = slashIdx !== -1 ? params.providerModel.slice(slashIdx + 1) : params.providerModel;
     const encodedModel = encodeURIComponent(modelId);
 
-    const action = params.stream ? 'streamGenerateContent?alt=sse' : 'generateContent';
-    const url = `${GEMINI_BASE}/${encodedModel}:${action}&key=${apiKey}`;
+    const action = params.stream ? 'streamGenerateContent' : 'generateContent';
+    const query = params.stream ? `?alt=sse&key=${apiKey}` : `?key=${apiKey}`;
+    const url = `${GEMINI_BASE}/${encodedModel}:${action}${query}`;
 
     try {
       const response = await axios.post(url, params.body, {

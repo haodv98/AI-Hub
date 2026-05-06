@@ -12,7 +12,7 @@
 
 ### Schema Migration
 
-- [ ] TASK-400: Prisma schema migration — ModelAlias, ProviderCombo tables, provider_keys extensions
+- [x] TASK-400: Prisma schema migration — ModelAlias, ProviderCombo tables, provider_keys extensions
   - File: `api/prisma/schema.prisma` (add enums + models), `api/prisma/migrations/20260701_provider_adapter.sql`
   - Dependencies: none (nhưng cần DB access)
   - Risk: high — schema changes block all Sprint 1 tasks; backfill SQL phải chạy đúng thứ tự
@@ -28,14 +28,14 @@
 
 ### ModelRouterModule
 
-- [ ] TASK-401: Tạo ModelRouterModule skeleton — NestJS module + service interface
+- [x] TASK-401: Tạo ModelRouterModule skeleton — NestJS module + service interface
   - File: `api/src/modules/model-router/model-router.module.ts`, `api/src/modules/model-router/model-router.service.ts`, `api/src/modules/model-router/model-router.types.ts`
   - Dependencies: TASK-400
   - Risk: low
   - Estimate: XS
   - Notes: Export `ModelRouterService`. Define interface `ModelRouterService { resolveAlias, parseProviderModel }`. Import RedisModule, PrismaService. Register trong AppModule.
 
-- [ ] TASK-402: Implement `ModelAliasService.resolveAlias` — cascade KEY → TEAM → ORG → passthrough
+- [x] TASK-402: Implement `ModelAliasService.resolveAlias` — cascade KEY → TEAM → ORG → passthrough
   - File: `api/src/modules/model-router/model-alias.service.ts`
   - Dependencies: TASK-401
   - Risk: medium — cascade logic phải đúng thứ tự ưu tiên (exact > glob; priority DESC; newer wins)
@@ -48,21 +48,21 @@
     5. Hỗ trợ `COMBO:` prefix: khi `toProviderModel` bắt đầu bằng `COMBO:` → return `COMBO:<name>` để ComboService handle tiếp.
     6. Function `parseProviderModel(input)`: lấy first `/` làm split point. Xem §1.2 của design doc.
 
-- [ ] TASK-403: Redis caching layer cho alias lookups
+- [x] TASK-403: Redis caching layer cho alias lookups
   - File: `api/src/modules/model-router/model-alias.service.ts` (extend)
   - Dependencies: TASK-402
   - Risk: low
   - Estimate: S
   - Notes: Cache key `aliases:<scope>:<scopeId>`, TTL 5 phút. Invalidate khi POST/PUT/DELETE alias qua Admin API. Cache miss → query Postgres, set Redis, return. Dùng existing RedisService pattern.
 
-- [ ] TASK-404: CRUD API — model aliases admin endpoints
+- [x] TASK-404: CRUD API — model aliases admin endpoints
   - File: `api/src/modules/model-router/model-alias.controller.ts`
   - Dependencies: TASK-402
   - Risk: low
   - Estimate: S
   - Notes: `@Roles('it_admin')`. Endpoints: `POST /admin/aliases`, `GET /admin/aliases` (filter by scope/scopeId), `GET /admin/aliases/:id`, `PATCH /admin/aliases/:id`, `DELETE /admin/aliases/:id`. Validate `fromPattern` (non-empty, max 255). Trigger Redis cache invalidation khi write.
 
-- [ ] TASK-405: GatewayService — feature flag + wire ModelRouterService
+- [x] TASK-405: GatewayService — feature flag + wire ModelRouterService
   - File: `api/src/modules/gateway/gateway.service.ts`
   - Dependencies: TASK-402
   - Risk: medium — đây là integration điểm; sai logic sẽ break tất cả requests của team được enable
@@ -76,7 +76,7 @@
 
 ### Admin UI — Alias Management
 
-- [ ] TASK-406: Admin UI — `/admin/aliases` page (list + create + edit)
+- [x] TASK-406: Admin UI — `/admin/aliases` page (list + create + edit)
   - File: `web/src/pages/Aliases.tsx`, `web/src/components/aliases/AliasForm.tsx`, `web/src/lib/api.ts` (add alias endpoints)
   - Dependencies: TASK-404
   - Risk: low
@@ -94,14 +94,14 @@
 
 ### FormatTranslatorModule
 
-- [ ] TASK-410: Tạo FormatTranslatorModule skeleton + `detectFormat()` function
+- [x] TASK-410: Tạo FormatTranslatorModule skeleton + `detectFormat()` function
   - File: `api/src/modules/format-translator/format-translator.module.ts`, `api/src/modules/format-translator/format-translator.service.ts`, `api/src/modules/format-translator/format-translator.types.ts`
   - Dependencies: TASK-401 (cùng layer, không có hard dependency)
   - Risk: low
   - Estimate: XS
   - Notes: Export `FormatTranslatorService`. Define `ChatFormat = 'anthropic' | 'openai' | 'gemini' | 'ollama'`. Implement `detectFormat(body)`: kiểm tra `anthropic_version` / `max_tokens + system` → anthropic; `contents` → gemini; `options + model + messages` → ollama; else → openai. URL path override: `/v1/messages` → anthropic.
 
-- [ ] TASK-411: Port open-sse translation logic — translateRequest/translateResponse (8 pairs)
+- [x] TASK-411: Port open-sse translation logic — translateRequest/translateResponse (8 pairs)
   - File: `api/src/modules/format-translator/translators/` (one file per pair)
   - Dependencies: TASK-410
   - Risk: high — SSE format phức tạp; edge cases với system messages, max_tokens, tool use
@@ -113,7 +113,7 @@
     4. Giữ attribution comment trong mỗi file: `// Ported from open-sse (MIT) — https://www.npmjs.com/package/open-sse`.
     5. Xem chi tiết §4.2 design doc.
 
-- [ ] TASK-412: FormatTranslatorStream — Node.js Transform stream cho SSE chunks
+- [x] TASK-412: FormatTranslatorStream — Node.js Transform stream cho SSE chunks
   - File: `api/src/modules/format-translator/format-translator.stream.ts`
   - Dependencies: TASK-411
   - Risk: high — streaming SSE dễ break; chunk boundary issues; `[DONE]` token handling
@@ -126,7 +126,7 @@
     5. Handle Gemini chunked JSON response.
     6. Xem §4.3 design doc.
 
-- [ ] TASK-413: ProviderAdapterModule skeleton + ProviderAdapter interface + adapter registry
+- [x] TASK-413: ProviderAdapterModule skeleton + ProviderAdapter interface + adapter registry
   - File: `api/src/modules/provider-adapter/provider-adapter.module.ts`, `api/src/modules/provider-adapter/provider-adapter.interface.ts`, `api/src/modules/provider-adapter/provider-adapter.registry.ts`
   - Dependencies: TASK-410
   - Risk: low
@@ -139,7 +139,7 @@
 
 ### 4 Core Adapters
 
-- [ ] TASK-414: `AnthropicAdapter` — native Anthropic Messages API
+- [x] TASK-414: `AnthropicAdapter` — native Anthropic Messages API
   - File: `api/src/modules/provider-adapter/adapters/anthropic.adapter.ts`
   - Dependencies: TASK-413
   - Risk: medium — native format, không qua OpenAI translator; cần handle streaming SSE correctly
@@ -151,7 +151,7 @@
     4. Streaming: pipe response qua `FormatTranslatorStream('anthropic', 'openai')`.
     5. Dùng `got` hoặc `axios` — nhất quán với codebase hiện tại.
 
-- [ ] TASK-415: `OpenAICompatibleAdapter` — generic class cho ~22 providers
+- [x] TASK-415: `OpenAICompatibleAdapter` — generic class cho ~22 providers
   - File: `api/src/modules/provider-adapter/adapters/openai-compatible.adapter.ts`
   - Dependencies: TASK-413
   - Risk: low
@@ -163,7 +163,7 @@
     4. Streaming: pipe response stream trực tiếp (same format).
     5. Xem §5.3 design doc. Đây là base class cho 22 providers cùng dùng.
 
-- [ ] TASK-416: `GeminiAdapter` — native Gemini generateContent API
+- [x] TASK-416: `GeminiAdapter` — native Gemini generateContent API
   - File: `api/src/modules/provider-adapter/adapters/gemini.adapter.ts`
   - Dependencies: TASK-413, TASK-411
   - Risk: medium — URL pattern chứa modelId; streaming là chunked JSON không phải SSE
@@ -175,7 +175,7 @@
     4. Streaming endpoint: `:streamGenerateContent?alt=sse` — handle chunked JSON stream.
     5. modelId phải được URL-encode nếu chứa ký tự đặc biệt.
 
-- [ ] TASK-417: `OpenRouterAdapter` — extends OpenAICompatibleAdapter
+- [x] TASK-417: `OpenRouterAdapter` — extends OpenAICompatibleAdapter
   - File: `api/src/modules/provider-adapter/adapters/openrouter.adapter.ts`
   - Dependencies: TASK-415
   - Risk: low
@@ -185,7 +185,7 @@
     2. Thêm extra headers: `HTTP-Referer: <AIHUB_PUBLIC_URL>`, `X-Title: AI Hub`.
     3. OpenRouter là universal fallback — bất kỳ model nào không có adapter riêng đều route qua đây.
 
-- [ ] TASK-418: Unit tests cho FormatTranslator (golden file fixtures)
+- [x] TASK-418: Unit tests cho FormatTranslator (golden file fixtures)
   - File: `api/src/modules/format-translator/__tests__/`, `api/src/modules/format-translator/__fixtures__/`
   - Dependencies: TASK-411
   - Risk: low — nếu bỏ qua test, streaming bug sẽ khó debug khi integrate với Cursor
@@ -202,7 +202,7 @@
 
 ### ComboResolver
 
-- [ ] TASK-420: `ProviderComboService` — fallback + round-robin algorithms
+- [x] TASK-420: `ProviderComboService` — fallback + round-robin algorithms
   - File: `api/src/modules/provider-adapter/provider-combo.service.ts`
   - Dependencies: TASK-413, TASK-415 (cần adapters để test)
   - Risk: medium — round-robin sticky session với Redis; edge cases khi Redis unavailable
@@ -214,14 +214,14 @@
     4. Emit metrics per attempt (xem TASK-443).
     5. Xem §3.2, §3.3 design doc cho pseudocode.
 
-- [ ] TASK-421: CRUD API — provider combo admin endpoints
+- [x] TASK-421: CRUD API — provider combo admin endpoints
   - File: `api/src/modules/provider-adapter/provider-combo.controller.ts`
   - Dependencies: TASK-420
   - Risk: low
   - Estimate: S
   - Notes: `@Roles('it_admin')`. Endpoints: `POST /admin/combos`, `GET /admin/combos`, `GET /admin/combos/:id`, `PATCH /admin/combos/:id`, `DELETE /admin/combos/:id`. Validate: `name` unique, `models` non-empty array, `strategy` enum. Invalidate Redis cache khi write.
 
-- [ ] TASK-422: Admin UI — `/admin/combos` page (list + create + edit)
+- [x] TASK-422: Admin UI — `/admin/combos` page (list + create + edit)
   - File: `web/src/pages/Combos.tsx`, `web/src/components/combos/ComboForm.tsx`
   - Dependencies: TASK-421
   - Risk: low
@@ -234,7 +234,7 @@
 
 ### 24 Remaining Adapters (batch via OpenAICompatibleAdapter)
 
-- [ ] TASK-423: OpenAI-compatible adapters batch A — DeepSeek, Groq, xAI, Mistral, Perplexity
+- [x] TASK-423: OpenAI-compatible adapters batch A — DeepSeek, Groq, xAI, Mistral, Perplexity
   - File: `api/src/modules/provider-adapter/adapters/openai-compatible-providers.ts`
   - Dependencies: TASK-415
   - Risk: low
@@ -247,7 +247,7 @@
     5. `PerplexityAdapter`: `new OpenAICompatibleAdapter('perplexity', 'https://api.perplexity.ai')`.
     6. Register tất cả vào ProviderAdapterRegistry.
 
-- [ ] TASK-424: OpenAI-compatible adapters batch B — Together, Fireworks, Cerebras, NVIDIA, Nebius
+- [x] TASK-424: OpenAI-compatible adapters batch B — Together, Fireworks, Cerebras, NVIDIA, Nebius
   - File: `api/src/modules/provider-adapter/adapters/openai-compatible-providers.ts` (extend)
   - Dependencies: TASK-415
   - Risk: low
@@ -259,7 +259,7 @@
     4. `NvidiaAdapter`: endpoint `https://integrate.api.nvidia.com/v1`.
     5. `NebiusAdapter`: endpoint `https://api.studio.nebius.ai/v1`.
 
-- [ ] TASK-425: OpenAI-compatible adapters batch C — SiliconFlow, Hyperbolic, GLM, Kimi, MiniMax
+- [x] TASK-425: OpenAI-compatible adapters batch C — SiliconFlow, Hyperbolic, GLM, Kimi, MiniMax
   - File: `api/src/modules/provider-adapter/adapters/openai-compatible-providers.ts` (extend)
   - Dependencies: TASK-415
   - Risk: low — China-region providers có thể cần egress allowlist; không block delivery
@@ -271,7 +271,7 @@
     4. `KimiAdapter`: `https://api.moonshot.cn/v1` — note: China region (Moonshot).
     5. `MiniMaxAdapter`: `https://api.minimax.chat/v1` — endpoint path `/text/chatcompletion_v2`.
 
-- [ ] TASK-426: OpenAI-compatible adapters batch D — Alibaba, Volcengine, BytePlus, Blackbox, Chutes
+- [x] TASK-426: OpenAI-compatible adapters batch D — Alibaba, Volcengine, BytePlus, Blackbox, Chutes
   - File: `api/src/modules/provider-adapter/adapters/openai-compatible-providers.ts` (extend)
   - Dependencies: TASK-415
   - Risk: low
@@ -285,7 +285,7 @@
 
 ### Native-Format Adapters
 
-- [ ] TASK-427: `CohereAdapter` — native Cohere v2 chat API
+- [x] TASK-427: `CohereAdapter` — native Cohere v2 chat API
   - File: `api/src/modules/provider-adapter/adapters/cohere.adapter.ts`
   - Dependencies: TASK-413, TASK-411
   - Risk: medium — Cohere v2 format khác OpenAI; cần manual mapping messages → chatHistory + message
@@ -297,7 +297,7 @@
     4. Response mapping: `{ text }` → OpenAI format `{ choices: [{ message: { content } }] }`.
     5. Streaming: `co-stream` format — parse `event-type: text-generation` chunks.
 
-- [ ] TASK-428: `AzureOpenAIAdapter` — Azure OpenAI Service
+- [x] TASK-428: `AzureOpenAIAdapter` — Azure OpenAI Service
   - File: `api/src/modules/provider-adapter/adapters/azure.adapter.ts`
   - Dependencies: TASK-415
   - Risk: medium — `baseUrl` required, deployment name trong URL path, api-version query param
@@ -314,6 +314,7 @@
   - Dependencies: TASK-416 (Gemini format)
   - Risk: high — OAuth2 service account token exchange; SA JSON lưu Vault; token rotation
   - Estimate: L
+  - **Status: DEFERRED (2026-05-06)** — Platform Team chưa resolve SA rotation strategy; complexity L + Risk high. Defer đến Sprint 4 hoặc khi có yêu cầu cụ thể từ team sử dụng Vertex AI.
   - Notes:
     1. Vault path: `secret/aihub/providers/vertex/shared` → `{ service_account_json, project_id, region }`.
     2. Token exchange: dùng `google-auth-library` npm package. Cache access token 55 phút (expire 60 phút).
@@ -321,7 +322,7 @@
     4. Format: Gemini native (kế thừa từ GeminiAdapter xử lý translate).
     5. Mở question: Vertex AI service account rotation strategy — Platform Team resolve trước Sprint 2 end.
 
-- [ ] TASK-430: `OllamaAdapter` — local models
+- [x] TASK-430: `OllamaAdapter` — local models
   - File: `api/src/modules/provider-adapter/adapters/ollama.adapter.ts`
   - Dependencies: TASK-415
   - Risk: low — chỉ dùng locally; không cần Vault
@@ -331,7 +332,7 @@
     2. `baseUrl` override từ `provider_keys.baseUrl` (allow custom Ollama host).
     3. No auth header (local model).
 
-- [ ] TASK-431: `CloudflareAdapter` — Cloudflare Workers AI
+- [x] TASK-431: `CloudflareAdapter` — Cloudflare Workers AI
   - File: `api/src/modules/provider-adapter/adapters/cloudflare.adapter.ts`
   - Dependencies: TASK-413
   - Risk: medium — URL pattern chứa accountId; response format khác OpenAI
@@ -385,7 +386,7 @@
     4. Ghi lại metrics trước/sau cutover mỗi team.
     5. Xem §10.2 design doc cho checklist đầy đủ.
 
-- [ ] TASK-441: Xóa LiteLLM khỏi docker-compose + infra/litellm/
+- [x] TASK-441: Xóa LiteLLM khỏi docker-compose + infra/litellm/
   - File: `infra/docker-compose.yml`, `infra/docker-compose.staging.yml` (remove litellm service), `infra/litellm/` (delete directory)
   - Dependencies: TASK-440 (tất cả teams đã cutover)
   - Risk: medium — destructive; đảm bảo không còn traffic qua LiteLLM trước khi xóa
@@ -397,7 +398,7 @@
     4. Update `.env.example`: remove `LITELLM_URL`, `LITELLM_MASTER_KEY`.
     5. Kiểm tra không còn reference nào trong codebase: `grep -r "litellm\|LITELLM" api/ infra/ web/`.
 
-- [ ] TASK-442: Cleanup GatewayService — remove LiteLLM code path
+- [x] TASK-442: Cleanup GatewayService — remove LiteLLM code path
   - File: `api/src/modules/gateway/gateway.service.ts`, `api/src/app.module.ts`
   - Dependencies: TASK-441
   - Risk: low — chỉ xóa code, không thêm
@@ -410,7 +411,7 @@
 
 ### Observability
 
-- [ ] TASK-443: Prometheus metrics cho Provider Adapter Layer
+- [x] TASK-443: Prometheus metrics cho Provider Adapter Layer
   - File: `api/src/modules/model-router/model-router.service.ts`, `api/src/modules/provider-adapter/provider-adapter.service.ts`, `api/src/modules/provider-adapter/provider-combo.service.ts`
   - Dependencies: TASK-420, TASK-421, các adapters
   - Risk: low

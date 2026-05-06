@@ -1,5 +1,5 @@
 import { NavLink } from 'react-router';
-import { LayoutDashboard, Users, User, Key, Gavel, BarChart3, History, Settings, FileBox, LogOut } from 'lucide-react';
+import { LayoutDashboard, Users, User, Key, Gavel, BarChart3, History, Settings, FileBox, LogOut, GitBranch, Layers, KeyRound } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import { useGlobalUi } from '@/contexts/GlobalUiContext';
 
@@ -9,6 +9,9 @@ const navItems = [
   { id: 'members', to: '/members', icon: User, label: 'Members', adminOnly: false },
   { id: 'keys', to: '/keys', icon: Key, label: 'Keys', adminOnly: true },
   { id: 'policies', to: '/policies', icon: Gavel, label: 'Policies', adminOnly: true },
+  { id: 'aliases', to: '/aliases', icon: GitBranch, label: 'Model Aliases', adminOnly: true },
+  { id: 'combos', to: '/combos', icon: Layers, label: 'Provider Combos', adminOnly: true },
+  { id: 'provider-keys', to: '/provider-keys', icon: KeyRound, label: 'Provider Keys', adminOnly: true },
   { id: 'usage', to: '/usage', icon: BarChart3, label: 'Usage', adminOnly: false },
   { id: 'audit', to: '/audit', icon: History, label: 'Audit Logs', adminOnly: true },
   { id: 'reports', to: '/reports', icon: FileBox, label: 'Reports', adminOnly: true },

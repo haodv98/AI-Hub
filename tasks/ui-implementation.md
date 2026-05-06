@@ -28,7 +28,7 @@
 
 ## P0 — Critical Bugs (unblock functional flows)
 
-- [ ] TASK-450: Fix ProviderCombos Create drawer — bind form state + Deploy + Add Hop
+- [x] TASK-450: Fix ProviderCombos Create drawer — bind form state + Deploy + Add Hop
   - File: `ai-hub-ui/src/components/ProviderCombos.tsx`
   - Risk: high — toàn bộ Create flow dead
   - Estimate: M
@@ -42,7 +42,7 @@
     7. **Hop trash buttons:** `setNewHops(prev => prev.filter((_, i) => i !== idx))`.
     8. **"Deploy Combo" (line ~256):** validate `comboName` non-empty + `newHops.length >= 1` → `setCombos(prev => [...prev, { id: uuid(), name: comboName, strategy: selectedStrategy, models: newHops, scope: selectedScope, ... }])` → close + reset.
 
-- [ ] TASK-451: Fix ModelAliases Add drawer — controlled inputs + Commit handler
+- [x] TASK-451: Fix ModelAliases Add drawer — controlled inputs + Commit handler
   - File: `ai-hub-ui/src/components/ModelAliases.tsx`
   - Risk: high — Create flow hoàn toàn không hoạt động
   - Estimate: M
@@ -56,7 +56,7 @@
     7. **"Commit Mapping" (line 390):** `setAliases(prev => [...prev, { id: uuid(), clientModel: newPattern, resolvesTo: newDestination, scope: newScope, priority: newPriority, active: newActive, type: newResolveType }])` → close + reset.
     8. **Active indicator (line 126):** `animate-pulse` chỉ khi `alias.active === true`.
 
-- [ ] TASK-452: Fix MemberDetail `_selectedExp` anti-pattern
+- [x] TASK-452: Fix MemberDetail `_selectedExp` anti-pattern
   - File: `ai-hub-ui/src/components/MemberDetail.tsx` line 737
   - Risk: medium — silent bug, expiration không track đúng
   - Estimate: XS
@@ -66,7 +66,7 @@
     3. `handleAssignProvider` line ~757: thay `(window as any)._selectedExp || 1` → `selectedExp`.
     4. Reset `setSelectedExp(1)` khi modal close.
 
-- [ ] TASK-453: Fix GlobalSearch — stale closure + result navigation + keyboard
+- [x] TASK-453: Fix GlobalSearch — stale closure + result navigation + keyboard
   - File: `ai-hub-ui/src/components/GlobalSearch.tsx`
   - Risk: medium
   - Estimate: S
@@ -75,7 +75,7 @@
     2. **Result click (line 115):** chỉ gọi `onClose()`, không navigate. Cần `onNavigate` prop (hoặc dùng router). `onClick={() => { onNavigate?.(result.tab); onClose(); }}`.
     3. **Keyboard navigation:** thêm `selectedIndex` state. `onKeyDown` trên input: ArrowDown → `setSelectedIndex(i => Math.min(i + 1, results.length - 1))`, ArrowUp → `Math.max(i - 1, 0)`, Enter → navigate to `results[selectedIndex]` + close. Style focused result với `border-l-2 border-primary`.
 
-- [ ] TASK-454: Fix App.tsx navigation bugs
+- [x] TASK-454: Fix App.tsx navigation bugs
   - File: `ai-hub-ui/src/App.tsx`
   - Risk: high — navigation state corruption ảnh hưởng toàn app
   - Estimate: S
@@ -88,7 +88,7 @@
 
 ## P1 — Core Functional Completeness
 
-- [ ] TASK-455: ProviderKeys — Edit/Rotate/Delete handlers
+- [x] TASK-455: ProviderKeys — Edit/Rotate/Delete handlers
   - File: `ai-hub-ui/src/components/ProviderKeys.tsx`
   - Risk: medium — tất cả 3 action icons không có onClick (lines 216–219)
   - Estimate: M
@@ -98,7 +98,7 @@
     3. Delete: confirmation → `setKeys(prev => prev.filter(k => k.id !== id))`.
     4. Modal phân biệt create vs edit mode qua `editingKey !== null`.
 
-- [ ] TASK-456: ProviderKeys Step 2 — conditional fields cho Azure/Vertex/Ollama
+- [x] TASK-456: ProviderKeys Step 2 — conditional fields cho Azure/Vertex/Ollama
   - File: `ai-hub-ui/src/components/ProviderKeys.tsx` (lines 314–327)
   - Risk: low — fields exist in state nhưng không render trong UI
   - Estimate: S
@@ -108,7 +108,7 @@
     3. Khi `newKeyConfig.provider === 'Ollama'`: thay API Key input bằng Base URL input (default `http://localhost:11434`).
     4. Đảm bảo provider list trong step 1 bao gồm `azure`, `vertex`, `ollama` entries.
 
-- [ ] TASK-457: ModelAliases — Edit/Delete/active toggle
+- [x] TASK-457: ModelAliases — Edit/Delete/active toggle
   - File: `ai-hub-ui/src/components/ModelAliases.tsx` (lines 170–174)
   - Risk: low
   - Estimate: S
@@ -117,7 +117,7 @@
     2. Delete: inline confirm → `setAliases(prev => prev.filter(a => a.id !== id))`.
     3. Active toggle per row (không cần mở drawer): `setAliases(prev => prev.map(a => a.id === id ? { ...a, active: !a.active } : a))`.
 
-- [ ] TASK-458: ProviderCombos — Edit/Delete + active toggle per card
+- [x] TASK-458: ProviderCombos — Edit/Delete + active toggle per card
   - File: `ai-hub-ui/src/components/ProviderCombos.tsx` (lines 104–107)
   - Risk: low
   - Estimate: S
@@ -137,7 +137,7 @@
     3. **Usage data per-key (lines 47–55):** `mockUsageHistory` là module-level constant, show same data cho mọi key — tạo 3–4 mock datasets, chọn theo `key.id.charCodeAt(0) % datasets.length`.
     4. **Policy column (lines 163–169):** hiện show `key.status` (ACTIVE/REVOKED) — thêm column "Policy" hiển thị `key.policy || '—'`, giữ Status column riêng.
 
-- [ ] TASK-460: Teams — stateful list + modals mutate state + member search
+- [x] TASK-460: Teams — stateful list + modals mutate state + member search
   - File: `ai-hub-ui/src/components/Teams.tsx`
   - Risk: low
   - Estimate: M
@@ -149,7 +149,7 @@
     5. Member search (lines 311–329): filter displayed list bằng `memberToSearch.toLowerCase()`.
     6. "Confirm Deployment" (line 339–344): update `team.memberCount` trong state.
 
-- [ ] TASK-461: Members — stateful list + Finalize/CSV/Purge
+- [x] TASK-461: Members — stateful list + Finalize/CSV/Purge
   - File: `ai-hub-ui/src/components/Members.tsx`
   - Risk: low
   - Estimate: M
@@ -221,7 +221,7 @@
 
 ## P3 — Architecture & Shared Data
 
-- [ ] TASK-467: Extract shared types vào `src/types/index.ts`
+- [x] TASK-467: Extract shared types vào `src/types/index.ts`
   - File: `ai-hub-ui/src/types/index.ts` (new)
   - Dependencies: none
   - Risk: low
@@ -242,7 +242,7 @@
     3. Components import và dùng làm `useState(mockXxx)` initial value.
     4. Giúp TASK-462 (VirtualKeyDetail trace) import aliases để evaluate.
 
-- [ ] TASK-469: API layer stub `src/lib/api.ts`
+- [x] TASK-469: API layer stub `src/lib/api.ts`
   - File: `ai-hub-ui/src/lib/api.ts` (new)
   - Dependencies: TASK-467, TASK-468
   - Risk: low
@@ -253,7 +253,7 @@
     3. `BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:3001'`.
     4. Thêm TODO comment per function cho future swap sang real `fetch`.
 
-- [ ] TASK-470: Add React Router — replace renderContent() switch
+- [x] TASK-470: Add React Router — replace renderContent() switch
   - File: `ai-hub-ui/src/App.tsx`, `ai-hub-ui/src/main.tsx`
   - Dependencies: TASK-467
   - Risk: medium — refactor routing, cần migrate cross-navigation callbacks
@@ -299,7 +299,7 @@
   - Estimate: XS
   - Fix: `key.length < 11 ? key.slice(0, 3) + '****' : key.slice(0, 7) + '****' + key.slice(-4)` — guard cho keys ngắn.
 
-- [ ] TASK-475: VirtualKeyDetail — fix `RotateCcw` local redeclaration
+- [x] TASK-475: VirtualKeyDetail — fix `RotateCcw` local redeclaration
   - File: `ai-hub-ui/src/components/VirtualKeyDetail.tsx` (line 243)
   - Risk: low
   - Estimate: XS

@@ -88,7 +88,7 @@ export class KeysController {
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
     summary:
-      'Set LiteLLM model id for this API key (overrides client `model` on gateway). Use for Claude Code + Gemini: clients send claude-*; set e.g. gemini-2.0-flash.',
+      'Set upstream model for this API key (overrides client `model` on gateway). Use for Claude Code + Gemini: clients send claude-*; set e.g. gemini/gemini-2.0-flash.',
   })
   @ApiParam({ name: 'id', type: String })
   async updateGatewayModel(

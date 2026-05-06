@@ -19,15 +19,22 @@ export class GatewayController {
 
   @Post('chat/completions')
   @UseGuards(ApiKeyGuard)
-  @ApiOperation({ summary: 'OpenAI-compatible chat completions (proxied via LiteLLM)' })
+  @ApiOperation({ summary: 'OpenAI-compatible chat completions' })
   @ApiBody({ schema: { properties: { model: { type: 'string', example: 'claude-sonnet-4-6' }, messages: { type: 'array' }, stream: { type: 'boolean' } } } })
-  async chatCompletions(@Req() req: Request, @Res() res: Response, @Body() body: any) {
-    const user = (req as any).user;
-    const { data, headers } = await this.gateway.handleRequest(user, body);
+  async chatCompletions(@Req() req: Request, @Res() res: Response, @Body() body: Record<string, unknown>) {
+    const user = (req as Request & { user: unknown }).user;
+    const result = await this.gateway.handleRequest(user as Parameters<typeof this.gateway.handleRequest>[0], body);
 
-    // Set enriched response headers
-    Object.entries(headers).forEach(([key, val]) => res.setHeader(key, val));
+    Object.entries(result.headers).forEach(([key, val]) => res.setHeader(key, val));
 
-    return res.json(data);
+    if (result.stream) {
+      res.setHeader('Content-Type', 'text/event-stream');
+      res.setHeader('Cache-Control', 'no-cache');
+      res.setHeader('Connection', 'keep-alive');
+      result.stream.pipe(res);
+      return;
+    }
+
+    return res.json(result.data);
   }
 }

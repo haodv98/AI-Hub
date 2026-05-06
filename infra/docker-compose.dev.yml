@@ -139,30 +139,6 @@ services:
       retries: 5
       start_period: 30s
 
-  # ── LiteLLM Proxy ────────────────────────────────────────────────────────────
-  litellm:
-    image: ghcr.io/berriai/litellm:main-latest
-    container_name: aihub-litellm
-    command: --config /app/config.yaml --port 4000 --detailed_debug
-    environment:
-      LITELLM_MASTER_KEY: ${LITELLM_MASTER_KEY:-sk-litellm-dev-master}
-      DATABASE_URL: ${LITELLM_DATABASE_URL:-postgresql://aihub:aihub_dev_secret@postgres:5432/litellm_dev}
-    ports:
-      - "4000:4000"
-    volumes:
-      - ../gateway/litellm_config.yaml:/app/config.yaml:ro
-    networks:
-      - aihub-net
-    depends_on:
-      postgres:
-        condition: service_healthy
-    healthcheck:
-      test: ["CMD", "curl", "-sf", "http://localhost:4000/health"]
-      interval: 15s
-      timeout: 5s
-      retries: 5
-      start_period: 30s
-
   # ── Prometheus ───────────────────────────────────────────────────────────────
   prometheus:
     image: prom/prometheus:latest

@@ -26,6 +26,27 @@
 | Hosting (Phase 4+) | **Cloud** (AWS/GCP, evaluate at Phase 4) |
 | Package Manager | **pnpm** (workspace monorepo) |
 
+## Frontend Development Workflow (CRITICAL)
+
+**`ai-hub-ui/` = static UI/UX mockup/prototype** — design reference ONLY, not production code.
+**`web/` = production frontend** — target for all frontend implementation.
+
+Frontend task workflow:
+1. Read `ai-hub-ui/src/components/<Component>.tsx` as **visual/UX design reference**
+2. **Implement in `web/src/pages/<Page>.tsx`** following web/ code patterns
+3. Use **TanStack Query** (`useQuery`/`useMutation`/`useQueryClient`) for server state
+4. Use **`getEnvelope`/`getPaginatedEnvelope`/`postEnvelope`/`patchEnvelope`/`deleteEnvelope`** from `@/lib/api`
+5. Use **`useAuth()`** for `isAdmin` check, **`useGlobalUi()`** for `pushToast`
+6. Use **`react-router`** (NOT react-router-dom) — `NavLink`, `useNavigate`, `useParams`, `useSearchParams`
+7. After adding page: update `web/src/router.tsx` + `web/src/components/organisms/Sidebar.tsx`
+
+Pattern from existing `web/src/pages/Keys.tsx`:
+- Interface for API response shape at top
+- Custom hook `useXxx()` wrapping `useQuery`
+- Inline mutations with `useMutation` + `onSuccess: qc.invalidateQueries(...) + pushToast(...)`
+- AnimatePresence modals in same file
+- `glass-panel`, `rounded-3xl`, `text-[10px] font-black uppercase tracking-widest` design tokens
+
 ## Workflow
 
 - Monorepo structure: `api/`, `web/`, `infra/`, `docs/`, `scripts/`, `tasks/`
